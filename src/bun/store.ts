@@ -413,7 +413,30 @@ export class ManagerStore {
       throw new Error(`Skill '${skillKey}' not found`);
     }
 
-    if (skill.source !== "local" || !skill.path) {
+    if (skill.source === "remote") {
+      const remoteMarkdown =
+        skill.origin && skill.skillId
+          ? await this.fetchRemoteSkillMarkdown(skill.origin, skill.skillId)
+          : null;
+
+      const fallbackMarkdown = [
+        `# ${skill.name}`,
+        "",
+        "Remote skill preview is not available yet for this repository layout.",
+        "",
+        skill.origin && skill.skillId
+          ? `Try opening: https://github.com/${skill.origin}/tree/main/skills/${skill.skillId}`
+          : "",
+      ].filter(Boolean).join("\n");
+
+      return {
+        skill,
+        markdown: remoteMarkdown || fallbackMarkdown,
+        editable: false,
+      };
+    }
+
+    if (!skill.path) {
       return {
         skill,
         markdown: "",
@@ -434,6 +457,143 @@ export class ManagerStore {
         markdown: "",
         editable: false,
       };
+    }
+  }
+
+  private async fetchRemoteSkillMarkdown(
+    origin: string,
+    skillId: string,
+  ): Promise<string | null> {
+    const variants = Array.from(
+      new Set([
+        skillId,
+        skillId.toLowerCase(),
+        skillId.replace(/_/g, "-"),
+        skillId.replace(/-/g, "_"),
+        `${skillId}-skill`,
+        `${skillId.toLowerCase()}-skill`,
+        `${skillId.replace(/_/g, "-")}-skill`,
+        `${skillId.replace(/-/g, "_")}-skill`,
+      ]),
+    );
+
+    const branches = ["main", "master"];
+    const paths = variants.flatMap((variant) => [
+      `skills/${variant}/SKILL.md`,
+      `${variant}/SKILL.md`,
+      `skills/${variant}/skill.md`,
+      `${variant}/skill.md`,
+    ]);
+
+    for (const branch of branches) {
+      for (const filePath of paths) {
+        const markdown = await this.fetchRawGithubMarkdown(origin, branch, filePath);
+        if (markdown) {
+          return markdown;
+        }
+      }
+    }
+
+    // Fallback: scan repository tree and pick the best matching SKILL.md path.
+    for (const branch of branches) {
+      const treePath = await this.findSkillPathInGithubTree(origin, branch, skillId);
+      if (!treePath) continue;
+
+      const markdown = await this.fetchRawGithubMarkdown(origin, branch, treePath);
+      if (markdown) {
+        return markdown;
+      }
+    }
+
+    return null;
+  }
+
+  private async fetchRawGithubMarkdown(
+    origin: string,
+    branch: string,
+    filePath: string,
+  ): Promise<string | null> {
+    const url = `https://raw.githubusercontent.com/${origin}/${branch}/${filePath}`;
+
+    try {
+      const response = await fetch(url);
+      if (!response.ok) return null;
+
+      const markdown = await response.text();
+      const cleaned = markdown.trim();
+      if (!cleaned || cleaned === "404: Not Found") return null;
+
+      return markdown;
+    } catch {
+      return null;
+    }
+  }
+
+  private async findSkillPathInGithubTree(
+    origin: string,
+    branch: string,
+    skillId: string,
+  ): Promise<string | null> {
+    const url = `https://api.github.com/repos/${origin}/git/trees/${branch}?recursive=1`;
+
+    try {
+      const response = await fetch(url, {
+        headers: {
+          accept: "application/vnd.github+json",
+        },
+      });
+
+      if (!response.ok) return null;
+
+      const payload = (await response.json()) as {
+        tree?: Array<{ path?: string; type?: string }>;
+      };
+
+      const candidates = (payload.tree || [])
+        .filter((entry) => entry.type === "blob" && typeof entry.path === "string")
+        .map((entry) => entry.path as string)
+        .filter((pathValue) => /(^|/)skill.md$/i.test(pathValue));
+
+      if (candidates.length === 0) return null;
+
+      const normalizedSkill = skillId.toLowerCase().replace(/[_\s]+/g, "-");
+      const normalizedNoSymbols = normalizedSkill.replace(/[-_]/g, "");
+
+      let bestPath: string | null = null;
+      let bestScore = Number.NEGATIVE_INFINITY;
+
+      for (const candidate of candidates) {
+        const lower = candidate.toLowerCase();
+        const dir = lower.replace(/\/skill\.md$/i, "");
+        const segments = dir.split("/").filter(Boolean);
+        const lastSegment = segments[segments.length - 1] || "";
+        const compactLast = lastSegment.replace(/[-_]/g, "");
+
+        let score = 0;
+
+        if (lastSegment === normalizedSkill) score += 120;
+        if (lastSegment === `${normalizedSkill}-skill`) score += 115;
+        if (lastSegment === `${normalizedSkill}_skill`) score += 112;
+        if (lastSegment.includes(normalizedSkill)) score += 70;
+
+        if (compactLast === normalizedNoSymbols) score += 80;
+        if (compactLast === `${normalizedNoSymbols}skill`) score += 75;
+
+        if (lower.includes(`/skills/${normalizedSkill}`)) score += 20;
+        if (lower.includes(`/skills/${normalizedSkill}-skill`)) score += 18;
+
+        // Slight preference for shallower paths after semantic matching.
+        score -= segments.length;
+
+        if (score > bestScore) {
+          bestScore = score;
+          bestPath = candidate;
+        }
+      }
+
+      return bestPath;
+    } catch {
+      return null;
     }
   }
 
