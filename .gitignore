@@ -1,0 +1,35 @@
+# Agency-provided source snapshot
+Agency UI Source/
+
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+build/
+out/
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+
+# Test / coverage
+coverage/
+
+# Runtime temp
+*.pid
+*.seed
+*.pid.lock

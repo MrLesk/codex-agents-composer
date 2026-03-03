@@ -1,0 +1,74 @@
+export type SkillSource = "local" | "remote";
+
+export type ReasoningEffort = "low" | "medium" | "high" | "xhigh" | string;
+
+export interface SkillRecord {
+  key: string;
+  source: SkillSource;
+  origin: string | null;
+  skillId: string | null;
+  name: string;
+  description: string | null;
+  path: string | null;
+  scope: string | null;
+  installs: number | null;
+}
+
+export interface AgentRecord {
+  id: string;
+  name: string;
+  description: string;
+  model: string;
+  reasoningEffort: ReasoningEffort;
+  instructions: string;
+  configFile: string;
+  skillCount: number;
+}
+
+export interface ModelRecord {
+  id: string;
+  displayName: string;
+  description: string;
+  defaultReasoningEffort: ReasoningEffort;
+  supportedReasoningEfforts: ReasoningEffort[];
+}
+
+export interface BootstrapPayload {
+  agents: AgentRecord[];
+  skills: SkillRecord[];
+  models: ModelRecord[];
+}
+
+export interface AgentDetailPayload {
+  agent: AgentRecord;
+  assignedSkills: SkillRecord[];
+  allSkills: SkillRecord[];
+  models: ModelRecord[];
+}
+
+export interface CreateAgentInput {
+  name: string;
+  description: string;
+  model: string;
+  reasoningEffort: ReasoningEffort;
+  instructions: string;
+}
+
+export interface UpdateAgentInput {
+  name: string;
+  description: string;
+  model: string;
+  reasoningEffort: ReasoningEffort;
+  instructions: string;
+}
+
+export interface SkillDocument {
+  skill: SkillRecord;
+  markdown: string;
+  editable: boolean;
+}
+
+export interface CreateSkillInput {
+  name: string;
+  markdown: string;
+}

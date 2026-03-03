@@ -1,0 +1,39 @@
+{
+  "name": "codex-agents-composer",
+  "version": "0.1.0",
+  "description": "ElectroBun desktop app for composing Codex agents and skills",
+  "type": "module",
+  "scripts": {
+    "start": "vite build && electrobun dev",
+    "dev": "electrobun dev --watch",
+    "dev:hmr": "concurrently \"bun run hmr\" \"bun run start\"",
+    "hmr": "vite --port 5173",
+    "build": "vite build",
+    "build:app": "vite build && electrobun build",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@tailwindcss/vite": "4.1.12",
+    "clsx": "2.1.1",
+    "electrobun": "1.14.4",
+    "lucide-react": "0.487.0",
+    "motion": "12.23.24",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "react-hook-form": "7.55.0",
+    "react-router": "7.13.0",
+    "tw-animate-css": "1.3.8"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/react": "18.3.12",
+    "@types/react-dom": "18.3.1",
+    "@vitejs/plugin-react": "4.7.0",
+    "autoprefixer": "10.4.20",
+    "concurrently": "9.1.0",
+    "postcss": "8.4.49",
+    "tailwindcss": "4.1.12",
+    "typescript": "5.7.2",
+    "vite": "6.3.5"
+  }
+}
