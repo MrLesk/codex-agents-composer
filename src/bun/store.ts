@@ -249,7 +249,7 @@ export class ManagerStore {
         },
         {
           keyPath: `agents.${agentId}`,
-          value: {},
+          value: null,
           mergeStrategy: "replace",
         },
       ]);
@@ -299,16 +299,28 @@ export class ManagerStore {
 
   async deleteAgent(agentId: string): Promise<void> {
     const current = await this.getAgent(agentId);
+    let fallbackConfigFile: string | null = null;
+
     if (!current) {
-      throw new Error(`Agent '${agentId}' not found in Codex config`);
+      const configRead = await this.readCodexConfig();
+      const agentsSection = configRead.config.agents || {};
+      const rawEntry = agentsSection[agentId];
+
+      if (!rawEntry || typeof rawEntry !== "object" || Array.isArray(rawEntry)) {
+        throw new Error(`Agent '${agentId}' not found in Codex config`);
+      }
+
+      fallbackConfigFile = (rawEntry as AgentSectionEntry).config_file || null;
     }
 
-    await this.writeAgentConfigValue(`agents.${agentId}`, {}, "replace");
+    await this.writeAgentConfigValue(`agents.${agentId}`, null, "replace");
+
     this.db.query("DELETE FROM agent_skills WHERE agent_id = ?1").run(agentId);
 
-    if (current.configFile) {
+    const configFile = current?.configFile || fallbackConfigFile;
+    if (configFile) {
       try {
-        await unlink(current.configFile);
+        await unlink(configFile);
       } catch {
         // Ignore cleanup errors for deleted agent config files.
       }
@@ -647,7 +659,11 @@ export class ManagerStore {
       throw new Error("Skill name is required");
     }
 
-    const nextDescription = input.description || "";
+    const nextDescription = (input.description || "").trim();
+    if (!nextDescription) {
+      throw new Error("Skill description is required");
+    }
+
     const nextContent = input.content || "";
     const current = this.parseSkillMarkdown(document.markdown, nextName);
 
@@ -693,6 +709,11 @@ export class ManagerStore {
       throw new Error("Skill name is required");
     }
 
+    const description = (input.description || "").trim();
+    if (!description) {
+      throw new Error("Skill description is required");
+    }
+
     const skillDir = path.join(this.codexHome, "skills", slug);
     const skillPath = path.join(skillDir, "SKILL.md");
 
@@ -713,7 +734,7 @@ export class ManagerStore {
     const markdown = this.serializeSkillMarkdown({
       frontmatter: {},
       name: input.name.trim() || slug,
-      description: input.description || "",
+      description,
       content,
     });
 
@@ -722,7 +743,7 @@ export class ManagerStore {
 
     await this.refreshLocalSkills();
     // Ensure the skill is in the catalog even if the app server didn't discover it
-    this.upsertLocalSkillCatalogEntry(skillPath, input.name.trim() || slug, input.description || null);
+    this.upsertLocalSkillCatalogEntry(skillPath, input.name.trim() || slug, description);
 
     const skillKey = `local:${skillPath}`;
     return this.getSkillDocument(skillKey);

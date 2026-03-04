@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
-import { ArrowLeft, ChevronDown, Cloud, HardDrive, Loader2, Package, Save, TriangleAlert } from "lucide-react";
+import { ArrowLeft, Check, ChevronDown, Cloud, Copy, HardDrive, Loader2, Package, Save, TriangleAlert } from "lucide-react";
 import { createSkill, fetchSkillDocument, saveSkillDocument } from "../api";
 import { useManager } from "../context/ManagerContext";
 import type { SkillDocument } from "../types";
@@ -58,6 +58,7 @@ export function SkillEditorPage() {
   const [dangerOpen, setDangerOpen] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
   const [deletingSkill, setDeletingSkill] = useState(false);
+  const [pathCopied, setPathCopied] = useState(false);
 
   useEffect(() => {
     if (isNew || !skillKey) {
@@ -116,6 +117,7 @@ export function SkillEditorPage() {
     if (isNew) return "Create Skill";
     return isRemoteSkill ? "Save Locally" : "Save";
   }, [isNew, isRemoteSkill]);
+  const hasRequiredFields = name.trim().length > 0 && description.trim().length > 0;
 
   const isLocalSkill = !isNew && document?.skill.source === "local";
   const deleteTargetName = name || document?.skill.name || "";
@@ -143,10 +145,27 @@ export function SkillEditorPage() {
     );
   };
 
+  const copyPath = async () => {
+    const skillPath = document?.skill.path;
+    if (!skillPath) return;
+
+    try {
+      await navigator.clipboard.writeText(skillPath);
+      setPathCopied(true);
+      setTimeout(() => setPathCopied(false), 1400);
+    } catch {
+      setLoadError("Failed to copy skill path");
+    }
+  };
+
   const save = async () => {
-    console.log("[save] called", { name, description, content: content.slice(0, 50), isNew, skillKey });
     if (!name.trim()) {
       setLoadError("Skill name is required");
+      return;
+    }
+
+    if (!description.trim()) {
+      setLoadError("Skill description is required");
       return;
     }
 
@@ -155,26 +174,22 @@ export function SkillEditorPage() {
 
     try {
       if (isNew) {
-        console.log("[save] creating new skill...");
         const created = await createSkill({
           name,
           description,
           content,
         });
-        console.log("[save] created:", created.skill.key);
         await refreshSkills(false);
         navigate(`/skill/${encodeURIComponent(created.skill.key)}`);
         return;
       }
 
       if (!skillKey) return;
-      console.log("[save] updating skill:", skillKey);
       const updated = await saveSkillDocument(skillKey, {
         name,
         description,
         content,
       });
-      console.log("[save] updated:", updated.skill.key);
 
       setDocument(updated);
       setName(updated.name || updated.skill.name);
@@ -186,7 +201,6 @@ export function SkillEditorPage() {
         navigate(`/skill/${encodeURIComponent(updated.skill.key)}`);
       }
     } catch (error) {
-      console.error("[save] error:", error);
       setLoadError(error instanceof Error ? error.message : String(error));
     } finally {
       setSaving(false);
@@ -211,14 +225,46 @@ export function SkillEditorPage() {
           <h1 className="text-2xl mt-2">
             {isNew ? "Create Skill" : `Skill Editor · ${name || skillKey || "unknown"}`}
           </h1>
-          <div className="mt-2 inline-flex items-center gap-1.5 rounded-md border border-gray-700 bg-[#141414] px-2 py-1 text-[11px] text-gray-300">
-            {isRemoteSkill ? <Cloud className="w-3.5 h-3.5 text-blue-400" /> : <HardDrive className="w-3.5 h-3.5 text-green-400" />}
-            {isRemoteSkill ? "Remote skill" : "Local skill"}
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <div className="inline-flex items-center gap-1.5 rounded-md border border-gray-700 bg-[#141414] px-2 py-1 text-[11px] text-gray-300">
+              {isRemoteSkill ? <Cloud className="w-3.5 h-3.5 text-blue-400" /> : <HardDrive className="w-3.5 h-3.5 text-green-400" />}
+              {isRemoteSkill ? "Remote skill" : "Local skill"}
+            </div>
+            {!isNew && document?.skill.path ? (
+              <div className="min-w-0 flex flex-1 items-center gap-2">
+                <code
+                  className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap rounded-md border border-gray-800 bg-[#121212] px-2.5 py-1.5 text-[11px] text-gray-300 font-mono select-all"
+                  title={document.skill.path}
+                >
+                  {document.skill.path}
+                </code>
+                <button
+                  type="button"
+                  onClick={() => void copyPath()}
+                  className="shrink-0 inline-flex items-center gap-1 rounded-md border border-gray-700 bg-[#141414] px-2 py-1 text-[11px] text-gray-300 hover:text-gray-100 hover:border-gray-600 cursor-pointer"
+                >
+                  {pathCopied ? <Check className="w-3.5 h-3.5 text-emerald-300" /> : <Copy className="w-3.5 h-3.5" />}
+                  {pathCopied ? "Copied" : "Copy"}
+                </button>
+              </div>
+            ) : null}
           </div>
           <p className="text-sm text-gray-500 mt-2">
             {isRemoteSkill
               ? "Editing this remote skill and saving will create a local copy."
-              : "Edit frontmatter description and markdown content below."}
+              : (
+                <>
+                  Need help writing a skill? Check{" "}
+                  <a
+                    href="https://agentskills.io/home"
+                    target="_blank"
+                    rel="noreferrer noopener"
+                    className="text-blue-300 hover:text-blue-200 underline underline-offset-2"
+                  >
+                    agentskills.io
+                  </a>
+                </>
+              )}
           </p>
           {canDragToAssign ? (
             <button
@@ -242,7 +288,7 @@ export function SkillEditorPage() {
         <button
           type="button"
           onClick={() => void save()}
-          disabled={saving || !name.trim()}
+          disabled={saving || !hasRequiredFields}
           className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm inline-flex items-center gap-2 disabled:opacity-70 cursor-pointer"
         >
           {saving ? (
@@ -265,29 +311,31 @@ export function SkillEditorPage() {
             placeholder="my-specialized-skill"
             className="w-full bg-[#161616] border border-gray-800 rounded-lg px-4 py-2.5 text-sm text-gray-100"
           />
-          {!isNew && document?.skill.path ? (
-            <p className="text-[11px] text-gray-600">{document.skill.path}</p>
-          ) : null}
         </div>
 
         <div className="space-y-1.5">
-          <label className="text-xs text-gray-400">Description (frontmatter)</label>
+          <label className="text-xs text-gray-400">Description - When should this skill be used?</label>
           <textarea
             value={description}
             onChange={(event) => setDescription(event.target.value)}
             rows={3}
             className="w-full bg-[#161616] border border-gray-800 rounded-lg px-4 py-2.5 text-sm text-gray-100"
-            placeholder="Use when..."
+            placeholder="Example: Use this skill when you need to ..."
           />
+          <p className="text-[11px] text-gray-500">
+            Write 1-2 sentences that describe the trigger or context for using this skill.
+          </p>
         </div>
 
         <div className="space-y-1.5 min-h-[420px]">
-          <label className="text-xs text-gray-400">Skill Content (Markdown)</label>
+          <label className="text-xs text-gray-400">What should the agent do?</label>
           <textarea
             value={content}
             onChange={(event) => setContent(event.target.value)}
             className="w-full min-h-[400px] bg-[#121212] border border-gray-800 rounded-lg px-4 py-3 text-sm text-gray-100 font-mono resize-y"
-            placeholder={"## Instructions\n\nWrite your skill content here..."}
+            placeholder={
+              "Describe the exact steps, constraints, and expected output.\n\nExample:\n1. Ask clarifying questions if context is missing.\n2. Follow the required workflow.\n3. Return output in the requested format."
+            }
           />
         </div>
       </div>

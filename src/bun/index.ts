@@ -1,4 +1,4 @@
-import Electrobun, { ApplicationMenu, BrowserWindow, Updater } from "electrobun/bun";
+import Electrobun, { ApplicationMenu, BrowserWindow, Updater, Utils } from "electrobun/bun";
 import { startApiServer } from "./api";
 import { ManagerStore } from "./store";
 
@@ -71,8 +71,48 @@ const win = new BrowserWindow({
   },
 });
 
+function resolveExternalUrlFromDetail(detail: unknown): string | null {
+  if (typeof detail === "string") {
+    return detail;
+  }
+
+  if (!detail || typeof detail !== "object" || Array.isArray(detail)) {
+    return null;
+  }
+
+  const maybeUrl = (detail as { url?: unknown }).url;
+  return typeof maybeUrl === "string" ? maybeUrl : null;
+}
+
+function isAllowedExternalUrl(rawUrl: string): boolean {
+  try {
+    const parsed = new URL(rawUrl);
+    if (!["http:", "https:"].includes(parsed.protocol)) {
+      return false;
+    }
+
+    const host = parsed.hostname.toLowerCase();
+    if (host === "localhost" || host === "127.0.0.1") {
+      return false;
+    }
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 Electrobun.events.on("application-menu-clicked", (e: { data: { action: string } }) => {
   if (e.data.action === "toggle-devtools") {
     win.webview.toggleDevTools();
   }
+});
+
+Electrobun.events.on("new-window-open", (e: { data: { detail: unknown } }) => {
+  const targetUrl = resolveExternalUrlFromDetail(e.data.detail);
+  if (!targetUrl || !isAllowedExternalUrl(targetUrl)) {
+    return;
+  }
+
+  Utils.openExternal(targetUrl);
 });
