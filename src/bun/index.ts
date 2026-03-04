@@ -24,6 +24,11 @@ const store = new ManagerStore(process.cwd());
 const apiServer = startApiServer(store, API_PORT);
 console.log(`Codex Agents Composer API listening on ${apiServer.url}`);
 
+const url = await getMainViewUrl();
+
+// setApplicationMenu must be called immediately before BrowserWindow with no
+// await in between — an Electrobun bug (GH #136/#160/#191) causes the native
+// dispatch_async to read a GC'd buffer if an async gap exists between the two calls.
 ApplicationMenu.setApplicationMenu([
   {
     submenu: [{ label: "Quit", role: "quit" }],
@@ -34,8 +39,13 @@ ApplicationMenu.setApplicationMenu([
       { role: "undo" },
       { role: "redo" },
       { type: "separator" },
-      // Clipboard shortcuts are handled in renderer keydown via execCommand.
-      // Keeping role-based copy/paste here can consume Cmd+C/V before JS sees them.
+      { role: "cut" },
+      { role: "copy" },
+      { role: "paste" },
+      { role: "pasteAndMatchStyle" },
+      { role: "delete" },
+      { type: "separator" },
+      { role: "selectAll" },
     ],
   },
   {
@@ -43,8 +53,6 @@ ApplicationMenu.setApplicationMenu([
     submenu: [{ role: "minimize" }, { role: "zoom" }, { role: "close" }],
   },
 ]);
-
-const url = await getMainViewUrl();
 
 new BrowserWindow({
   title: "Codex Agents Composer",
