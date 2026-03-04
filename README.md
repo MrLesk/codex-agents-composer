@@ -1,37 +1,56 @@
-# Codex Agents Composer (ElectroBun)
+<p align="center">
+  <img src="codex-agents-composer-logo.png" alt="Codex Agents Composer" width="128" />
+</p>
 
-Desktop app for managing Codex agents and assigning skills via drag and drop.
+<h1 align="center">Codex Agents Composer</h1>
 
-## What this MVP includes
+<p align="center">
+  A desktop application for managing your Codex agents and their skills.
+</p>
 
-- ElectroBun shell + React UI
-- Agent-centric sidebar (project-scoped agents removed)
-- Main skill catalog view (local + skills.sh)
-- Drag/drop skill assignment from catalog to agent sidebar
-- Agent detail editor (model, reasoning, instructions) + assigned/catalog board
-- Agent persistence in Codex config (`~/.codex/config.toml` + per-agent config files)
-- Skills metadata + assignment history in local SQLite
-- Codex App Server integration for:
-  - model list / reasoning options
-  - local skills list
-  - config read/write
+---
 
-## Run
+## Overview
+
+Codex Agents Composer provides a visual interface for creating, configuring, and organizing Codex agents. Instead of editing configuration files by hand, you can manage everything through a straightforward desktop app — define agents, assign skills, and fine-tune settings in one place.
+
+## Features
+
+- **Agent management** — Create and configure Codex agents with a friendly UI. Set models, reasoning levels, and developer instructions without touching config files.
+- **Skill catalog** — Browse available skills from the [skills.sh](https://skills.sh) repository or create your own in the integrated editor.
+- **Drag-and-drop assignment** — Assign skills to agents by dragging them from the catalog. Reorder or remove assignments just as easily.
+- **Persistent configuration** — All changes are saved to your Codex config (`~/.codex/`), so agents and skills are ready to use from the command line immediately.
+
+## Installation
+
+Requires [Bun](https://bun.sh).
 
 ```bash
 bun install
+```
+
+## Usage
+
+```bash
 bun run dev:hmr
 ```
 
-## Build
+This starts the app with hot module reloading for the UI.
+
+Alternatively, to run without HMR:
 
 ```bash
-bun run build
+bun run start
 ```
 
-## Notes
+## Building
 
-- API server runs inside the Bun process on `http://127.0.0.1:8765`.
-- Dragging a remote skill onto an agent runs:
-  - `npx -y skills add <owner/repo> -g -a codex -s <skillId> -y`
-- Remote catalog ingestion reads the `skills.sh` RSC payload embedded in the page response.
+To produce a distributable application bundle:
+
+```bash
+bun run build:app
+```
+
+## License
+
+MIT
