@@ -664,10 +664,7 @@ export class ManagerStore {
       }
     }
 
-    const content =
-      input.content?.trim().length
-        ? input.content
-        : this.buildDefaultSkillContent();
+    const content = input.content || "";
 
     const markdown = this.serializeSkillMarkdown({
       frontmatter: {},
@@ -1398,7 +1395,34 @@ export class ManagerStore {
       description: input.description,
     };
 
-    const yaml = Bun.YAML.stringify(frontmatter).trimEnd();
+    const yamlLines: string[] = [];
+    for (const [key, value] of Object.entries(frontmatter)) {
+      if (typeof value === "string") {
+        if (value.includes("\n")) {
+          yamlLines.push(`${key}: |`);
+          for (const line of value.split("\n")) {
+            yamlLines.push(`  ${line}`);
+          }
+        } else {
+          yamlLines.push(`${key}: ${JSON.stringify(value)}`);
+        }
+        continue;
+      }
+
+      if (typeof value === "number" || typeof value === "boolean") {
+        yamlLines.push(`${key}: ${String(value)}`);
+        continue;
+      }
+
+      if (value == null) {
+        yamlLines.push(`${key}: null`);
+        continue;
+      }
+
+      yamlLines.push(`${key}: ${Bun.YAML.stringify(value).trim()}`);
+    }
+
+    const yaml = yamlLines.join("\n");
     const normalizedContent = (input.content || "")
       .replace(/\r\n/g, "\n")
       .replace(/^\n+/, "")

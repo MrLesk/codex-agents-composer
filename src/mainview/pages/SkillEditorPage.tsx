@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
-import { ArrowLeft, Cloud, HardDrive, Loader2, Save } from "lucide-react";
+import { ArrowLeft, Cloud, HardDrive, Loader2, Package, Save } from "lucide-react";
 import { createSkill, fetchSkillDocument, saveSkillDocument } from "../api";
 import { useManager } from "../context/ManagerContext";
 import type { SkillDocument } from "../types";
+
+const SKILL_MIME_TYPE = "application/x-codex-skill";
 
 function parseFallbackFromMarkdown(markdown: string, fallbackName: string): {
   name: string;
@@ -44,7 +46,7 @@ export function SkillEditorPage() {
   const { skillKey } = useParams<{ skillKey: string }>();
   const navigate = useNavigate();
   const { refreshSkills } = useManager();
-  const isNew = skillKey === "new";
+  const isNew = !skillKey || skillKey === "new";
 
   const [loading, setLoading] = useState(!isNew);
   const [saving, setSaving] = useState(false);
@@ -112,7 +114,19 @@ export function SkillEditorPage() {
     return isRemoteSkill ? "Save Locally" : "Save";
   }, [isNew, isRemoteSkill]);
 
+  const canDragToAssign = !isNew && Boolean(document?.skill.key);
+
+  const onSkillDragStart = (event: React.DragEvent<HTMLButtonElement>) => {
+    if (!document?.skill.key) return;
+    event.dataTransfer.effectAllowed = "copy";
+    event.dataTransfer.setData(
+      SKILL_MIME_TYPE,
+      JSON.stringify({ skillKey: document.skill.key, intent: "assign" }),
+    );
+  };
+
   const save = async () => {
+    console.log("[save] called", { name, description, content: content.slice(0, 50), isNew, skillKey });
     if (!name.trim()) {
       setLoadError("Skill name is required");
       return;
@@ -123,22 +137,26 @@ export function SkillEditorPage() {
 
     try {
       if (isNew) {
+        console.log("[save] creating new skill...");
         const created = await createSkill({
           name,
           description,
           content,
         });
+        console.log("[save] created:", created.skill.key);
         await refreshSkills(true);
         navigate(`/skill/${encodeURIComponent(created.skill.key)}`);
         return;
       }
 
       if (!skillKey) return;
+      console.log("[save] updating skill:", skillKey);
       const updated = await saveSkillDocument(skillKey, {
         name,
         description,
         content,
       });
+      console.log("[save] updated:", updated.skill.key);
 
       setDocument(updated);
       setName(updated.name || updated.skill.name);
@@ -150,6 +168,7 @@ export function SkillEditorPage() {
         navigate(`/skill/${encodeURIComponent(updated.skill.key)}`);
       }
     } catch (error) {
+      console.error("[save] error:", error);
       setLoadError(error instanceof Error ? error.message : String(error));
     } finally {
       setSaving(false);
@@ -183,6 +202,18 @@ export function SkillEditorPage() {
               ? "Editing this remote skill and saving will create a local copy."
               : "Edit frontmatter description and markdown content below."}
           </p>
+          {canDragToAssign ? (
+            <button
+              type="button"
+              draggable
+              onDragStart={onSkillDragStart}
+              className="mt-2 inline-flex items-center gap-2 rounded-md border border-gray-700 bg-[#141414] px-2.5 py-1.5 text-xs text-gray-200 cursor-grab active:cursor-grabbing hover:border-blue-500/50"
+              title="Drag to an agent in the sidebar to assign"
+            >
+              <Package className="w-3.5 h-3.5 text-gray-400" />
+              Drag this skill to assign
+            </button>
+          ) : null}
           {loadError ? (
             <p className="mt-2 text-xs text-red-300 bg-red-500/10 border border-red-500/30 rounded-md px-2 py-1.5">
               {loadError}

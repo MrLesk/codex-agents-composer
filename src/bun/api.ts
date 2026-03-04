@@ -25,12 +25,58 @@ function asErrorMessage(error: unknown): string {
   return String(error);
 }
 
-function parseSkillWriteInput(body: SaveSkillInput): SaveSkillInput {
+function parseMarkdownPayload(markdown: string): SaveSkillInput {
+  const normalized = markdown.replace(/\r\n/g, "\n");
+  const match = normalized.match(/^---\n([\s\S]*?)\n---(?:\n|$)/);
+
+  let frontmatter: Record<string, unknown> = {};
+  let content = normalized;
+
+  if (match) {
+    const frontmatterRaw = match[1] || "";
+    try {
+      const parsed = Bun.YAML.parse(frontmatterRaw);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        frontmatter = parsed as Record<string, unknown>;
+      }
+    } catch {
+      frontmatter = {};
+    }
+    content = normalized.slice(match[0].length);
+  }
+
   return {
-    name: typeof body.name === "string" ? body.name : "",
-    description: typeof body.description === "string" ? body.description : "",
-    content: typeof body.content === "string" ? body.content : "",
+    name: typeof frontmatter.name === "string" ? frontmatter.name : "",
+    description:
+      typeof frontmatter.description === "string" ? frontmatter.description : "",
+    content,
   };
+}
+
+function parseSkillWriteInput(body: unknown): SaveSkillInput {
+  const source =
+    body && typeof body === "object" ? (body as Record<string, unknown>) : {};
+
+  const input: SaveSkillInput = {
+    name: typeof source.name === "string" ? source.name : "",
+    description:
+      typeof source.description === "string" ? source.description : "",
+    content: typeof source.content === "string" ? source.content : "",
+  };
+
+  const legacyMarkdown =
+    typeof source.markdown === "string" ? source.markdown : "";
+
+  if (legacyMarkdown) {
+    const parsed = parseMarkdownPayload(legacyMarkdown);
+    return {
+      name: input.name || parsed.name,
+      description: input.description || parsed.description,
+      content: input.content || parsed.content,
+    };
+  }
+
+  return input;
 }
 
 export function startApiServer(store: ManagerStore, port: number) {

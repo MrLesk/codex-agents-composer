@@ -1,4 +1,4 @@
-import { ApplicationMenu, BrowserWindow, Updater } from "electrobun/bun";
+import Electrobun, { ApplicationMenu, BrowserWindow, Updater } from "electrobun/bun";
 import { startApiServer } from "./api";
 import { ManagerStore } from "./store";
 
@@ -49,12 +49,18 @@ ApplicationMenu.setApplicationMenu([
     ],
   },
   {
+    label: "View",
+    submenu: [
+      { label: "Toggle DevTools", action: "toggle-devtools", accelerator: "i" },
+    ],
+  },
+  {
     label: "Window",
     submenu: [{ role: "minimize" }, { role: "zoom" }, { role: "close" }],
   },
 ]);
 
-new BrowserWindow({
+const win = new BrowserWindow({
   title: "Codex Agents Composer",
   url,
   frame: {
@@ -63,4 +69,10 @@ new BrowserWindow({
     x: 120,
     y: 80,
   },
+});
+
+Electrobun.events.on("application-menu-clicked", (e: { data: { action: string } }) => {
+  if (e.data.action === "toggle-devtools") {
+    win.webview.toggleDevTools();
+  }
 });
