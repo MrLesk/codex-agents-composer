@@ -552,7 +552,7 @@ export class ManagerStore {
       const candidates = (payload.tree || [])
         .filter((entry) => entry.type === "blob" && typeof entry.path === "string")
         .map((entry) => entry.path as string)
-        .filter((pathValue) => /(^|/)skill.md$/i.test(pathValue));
+        .filter((pathValue) => /(^|\/)skill\.md$/i.test(pathValue));
 
       if (candidates.length === 0) return null;
 
