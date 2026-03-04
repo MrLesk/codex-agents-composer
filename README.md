@@ -10,6 +10,10 @@
 
 ---
 
+<p align="center">
+  <img src="codex-agents-composer.gif" alt="Codex Agents Composer demo" width="720" />
+</p>
+
 ## Overview
 
 Codex Agents Composer provides a visual interface for creating, configuring, and organizing Codex agents. Instead of editing configuration files by hand, you can manage everything through a straightforward desktop app — define agents, assign skills, and fine-tune settings in one place.
