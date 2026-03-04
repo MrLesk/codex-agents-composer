@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router";
 import { useForm } from "react-hook-form";
-import { ArrowLeft, ChevronDown, Loader2, Plus, Save, Search, TriangleAlert } from "lucide-react";
+import { ArrowLeft, Check, ChevronDown, Copy, Loader2, Plus, Save, Search, TriangleAlert } from "lucide-react";
 import { createAgent, fetchAgentDetail, updateAgent } from "../api";
 import { SkillCard } from "../components/SkillCard";
 import { useManager } from "../context/ManagerContext";
@@ -53,6 +53,8 @@ export function AgentPage() {
   const [dangerOpen, setDangerOpen] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
   const [deletingAgent, setDeletingAgent] = useState(false);
+  const [agentConfigPath, setAgentConfigPath] = useState<string | null>(null);
+  const [configPathCopied, setConfigPathCopied] = useState(false);
 
   const {
     register,
@@ -78,6 +80,7 @@ export function AgentPage() {
         .then((payload) => {
           setAssignedSkills(payload.assignedSkills);
           setAllSkills(payload.allSkills);
+          setAgentConfigPath(payload.agent.configFile || null);
           reset({
             name: payload.agent.name,
             description: payload.agent.description,
@@ -95,6 +98,7 @@ export function AgentPage() {
     setLoading(false);
     setAssignedSkills([]);
     setAllSkills(catalogSkills);
+    setAgentConfigPath(null);
     reset({
       name: "",
       description: "",
@@ -116,6 +120,7 @@ export function AgentPage() {
   useEffect(() => {
     setDangerOpen(false);
     setDeleteConfirmText("");
+    setConfigPathCopied(false);
   }, [agentId, isCreate]);
 
   const selectedModelId = watch("model");
@@ -204,6 +209,7 @@ export function AgentPage() {
         const refreshed = await fetchAgentDetail(updated.id);
         setAssignedSkills(refreshed.assignedSkills);
         setAllSkills(refreshed.allSkills);
+        setAgentConfigPath(refreshed.agent.configFile || null);
       }
     } finally {
       setSaving(false);
@@ -310,6 +316,18 @@ export function AgentPage() {
     }
   };
 
+  const copyAgentConfigPath = async () => {
+    if (!agentConfigPath) return;
+
+    try {
+      await navigator.clipboard.writeText(agentConfigPath);
+      setConfigPathCopied(true);
+      setTimeout(() => setConfigPathCopied(false), 1400);
+    } catch {
+      // Ignore clipboard errors silently.
+    }
+  };
+
   if (loading) {
     return <div className="p-8 text-sm text-gray-500">Loading agent...</div>;
   }
@@ -329,6 +347,29 @@ export function AgentPage() {
           <p className="text-sm text-gray-500 mt-1">
             Configure model, reasoning, and instructions. Skills are assigned below.
           </p>
+          {!isCreate && agentConfigPath ? (
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <span className="shrink-0 text-[10px] uppercase tracking-wide text-gray-500">
+                Config file
+              </span>
+              <div className="min-w-0 flex flex-1 items-center gap-2">
+                <code
+                  className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap rounded-md border border-gray-800 bg-[#121212] px-2.5 py-1.5 text-[11px] text-gray-300 font-mono select-all"
+                  title={agentConfigPath}
+                >
+                  {agentConfigPath}
+                </code>
+                <button
+                  type="button"
+                  onClick={() => void copyAgentConfigPath()}
+                  className="shrink-0 inline-flex items-center gap-1 rounded-md border border-gray-700 bg-[#141414] px-2 py-1 text-[11px] text-gray-300 hover:text-gray-100 hover:border-gray-600 cursor-pointer"
+                >
+                  {configPathCopied ? <Check className="w-3.5 h-3.5 text-emerald-300" /> : <Copy className="w-3.5 h-3.5" />}
+                  {configPathCopied ? "Copied" : "Copy"}
+                </button>
+              </div>
+            </div>
+          ) : null}
         </div>
         <button
           type="button"
