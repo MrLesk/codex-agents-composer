@@ -5,6 +5,7 @@ import { mkdirSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { callCodexAppServer } from "./appServerClient";
+import { buildSkillSearchQueryVariants, resolveSkillSearchLookupQuery } from "../shared/skillSearchQuery";
 import type {
   AgentDetailPayload,
   AgentRecord,
@@ -374,9 +375,10 @@ export class ManagerStore {
   }
 
   async searchSkills(query: string, refreshRemote = false): Promise<SkillRecord[]> {
-    const normalizedQuery = query.trim().toLowerCase();
+    const queryVariants = buildSkillSearchQueryVariants(query);
+    const lookupQuery = resolveSkillSearchLookupQuery(query);
 
-    if (!normalizedQuery) {
+    if (queryVariants.length === 0) {
       if (refreshRemote) {
         return this.refreshSkillsCatalog(true);
       }
@@ -388,19 +390,19 @@ export class ManagerStore {
     }
 
     let matches = this.getSkills().filter((skill) =>
-      this.matchesSkillQuery(skill, normalizedQuery),
+      this.matchesSkillQuery(skill, queryVariants),
     );
 
     const shouldLookupRemote =
-      !normalizedQuery.startsWith("local:") &&
-      normalizedQuery.length >= 3;
+      !lookupQuery.startsWith("local:") &&
+      lookupQuery.length >= 3;
 
     if (!shouldLookupRemote) {
       return matches;
     }
 
     try {
-      const discovered = await this.searchRemoteSkillsByQuery(normalizedQuery);
+      const discovered = await this.searchRemoteSkillsByQuery(lookupQuery);
 
       if (discovered.length === 0) {
         return matches;
@@ -408,7 +410,7 @@ export class ManagerStore {
 
       this.upsertRemoteSkills(discovered);
       matches = this.getSkills().filter((skill) =>
-        this.matchesSkillQuery(skill, normalizedQuery),
+        this.matchesSkillQuery(skill, queryVariants),
       );
       return matches;
     } catch {
@@ -1171,14 +1173,22 @@ export class ManagerStore {
     }
   }
 
-  private matchesSkillQuery(skill: SkillRecord, query: string): boolean {
-    return (
-      skill.name.toLowerCase().includes(query) ||
-      (skill.origin || "").toLowerCase().includes(query) ||
-      (skill.skillId || "").toLowerCase().includes(query) ||
-      (skill.description || "").toLowerCase().includes(query) ||
-      (skill.path || "").toLowerCase().includes(query) ||
-      skill.key.toLowerCase().includes(query)
+  private matchesSkillQuery(skill: SkillRecord, queryVariants: string[]): boolean {
+    if (queryVariants.length === 0) {
+      return true;
+    }
+
+    const haystacks = [
+      skill.name,
+      skill.origin || "",
+      skill.skillId || "",
+      skill.description || "",
+      skill.path || "",
+      skill.key,
+    ].map((value) => value.toLowerCase());
+
+    return queryVariants.some((query) =>
+      haystacks.some((haystack) => haystack.includes(query)),
     );
   }
 

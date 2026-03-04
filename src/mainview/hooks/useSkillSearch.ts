@@ -1,6 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { fetchSkills } from "../api";
 import type { Skill } from "../types";
+import {
+  buildSkillSearchQueryVariants,
+  resolveSkillSearchLookupQuery,
+} from "../../shared/skillSearchQuery";
 
 export type SkillSourceFilter = "all" | "local" | "remote";
 
@@ -13,22 +17,26 @@ interface UseSkillSearchOptions {
   debounceMs?: number;
 }
 
-function matchesSkillQuery(skill: Skill, normalizedQuery: string): boolean {
-  if (!normalizedQuery) return true;
+function matchesSkillQuery(skill: Skill, queryVariants: string[]): boolean {
+  if (queryVariants.length === 0) return true;
 
-  return (
-    skill.name.toLowerCase().includes(normalizedQuery) ||
-    (skill.origin || "").toLowerCase().includes(normalizedQuery) ||
-    (skill.skillId || "").toLowerCase().includes(normalizedQuery) ||
-    (skill.description || "").toLowerCase().includes(normalizedQuery) ||
-    (skill.path || "").toLowerCase().includes(normalizedQuery) ||
-    skill.key.toLowerCase().includes(normalizedQuery)
+  const haystacks = [
+    skill.name,
+    skill.origin || "",
+    skill.skillId || "",
+    skill.description || "",
+    skill.path || "",
+    skill.key,
+  ].map((value) => value.toLowerCase());
+
+  return queryVariants.some((query) =>
+    haystacks.some((haystack) => haystack.includes(query)),
   );
 }
 
 function applyFilters(
   skills: Skill[],
-  normalizedQuery: string,
+  queryVariants: string[],
   sourceFilter: SkillSourceFilter,
   skillFilter?: (skill: Skill) => boolean,
 ): Skill[] {
@@ -41,7 +49,7 @@ function applyFilters(
       return false;
     }
 
-    return matchesSkillQuery(skill, normalizedQuery);
+    return matchesSkillQuery(skill, queryVariants);
   });
 }
 
@@ -56,11 +64,18 @@ export function useSkillSearch({
   const [searchedSkills, setSearchedSkills] = useState<Skill[] | null>(null);
   const [searchingRemote, setSearchingRemote] = useState(false);
 
-  const normalizedQuery = useMemo(() => query.trim().toLowerCase(), [query]);
+  const queryVariants = useMemo(
+    () => buildSkillSearchQueryVariants(query),
+    [query],
+  );
+  const lookupQuery = useMemo(
+    () => resolveSkillSearchLookupQuery(query),
+    [query],
+  );
 
   const baseFiltered = useMemo(
-    () => applyFilters(skills, normalizedQuery, sourceFilter, skillFilter),
-    [skills, normalizedQuery, sourceFilter, skillFilter],
+    () => applyFilters(skills, queryVariants, sourceFilter, skillFilter),
+    [skills, queryVariants, sourceFilter, skillFilter],
   );
 
   useEffect(() => {
@@ -75,7 +90,7 @@ export function useSkillSearch({
     const shouldLookupRemote =
       enableRemoteLookup &&
       sourceFilter !== "local" &&
-      q.length >= 3;
+      lookupQuery.length >= 3;
 
     if (!shouldLookupRemote) {
       setSearchedSkills(null);
@@ -87,7 +102,7 @@ export function useSkillSearch({
 
     let cancelled = false;
     const timer = window.setTimeout(() => {
-      void fetchSkills(false, q)
+      void fetchSkills(false, lookupQuery)
         .then((results) => {
           if (cancelled) return;
           setSearchedSkills(results);
@@ -106,15 +121,15 @@ export function useSkillSearch({
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [query, sourceFilter, enableRemoteLookup, debounceMs]);
+  }, [query, lookupQuery, sourceFilter, enableRemoteLookup, debounceMs]);
 
   const filteredSkills = useMemo(() => {
     if (!searchedSkills) {
       return baseFiltered;
     }
 
-    return applyFilters(searchedSkills, normalizedQuery, sourceFilter, skillFilter);
-  }, [searchedSkills, baseFiltered, normalizedQuery, sourceFilter, skillFilter]);
+    return applyFilters(searchedSkills, queryVariants, sourceFilter, skillFilter);
+  }, [searchedSkills, baseFiltered, queryVariants, sourceFilter, skillFilter]);
 
   return {
     filteredSkills,
