@@ -140,7 +140,11 @@ export class ManagerStore {
 
   async getBootstrap(refresh = false): Promise<BootstrapPayload> {
     await this.refreshLocalSkills();
-    await this.refreshRemoteSkills(refresh);
+    try {
+      await this.refreshRemoteSkills(refresh);
+    } catch {
+      // Remote refresh is best-effort; don't block bootstrap.
+    }
 
     const [agents, skills, models] = await Promise.all([
       this.getAgents(),
@@ -404,7 +408,11 @@ export class ManagerStore {
 
   async refreshSkillsCatalog(forceRemote = true): Promise<SkillRecord[]> {
     await this.refreshLocalSkills();
-    await this.refreshRemoteSkills(forceRemote);
+    try {
+      await this.refreshRemoteSkills(forceRemote);
+    } catch {
+      // Remote refresh is best-effort; don't block local skill visibility.
+    }
     return this.getSkills();
   }
 
@@ -660,6 +668,7 @@ export class ManagerStore {
       await mkdir(path.dirname(skillPath), { recursive: true });
       await writeFile(skillPath, markdown, "utf8");
       await this.refreshLocalSkills();
+      this.upsertLocalSkillCatalogEntry(skillPath, nextName, nextDescription || null);
 
       return this.getSkillDocument(`local:${skillPath}`);
     }
@@ -672,6 +681,7 @@ export class ManagerStore {
     await mkdir(path.dirname(localPath), { recursive: true });
     await writeFile(localPath, markdown, "utf8");
     await this.refreshLocalSkills();
+    this.upsertLocalSkillCatalogEntry(localPath, nextName, nextDescription || null);
 
     return this.getSkillDocument(`local:${localPath}`);
   }
@@ -711,6 +721,8 @@ export class ManagerStore {
     await writeFile(skillPath, markdown, "utf8");
 
     await this.refreshLocalSkills();
+    // Ensure the skill is in the catalog even if the app server didn't discover it
+    this.upsertLocalSkillCatalogEntry(skillPath, input.name.trim() || slug, input.description || null);
 
     const skillKey = `local:${skillPath}`;
     return this.getSkillDocument(skillKey);
@@ -1009,6 +1021,26 @@ export class ManagerStore {
     ];
 
     await writeFile(configFile, lines.join("\n"), "utf8");
+  }
+
+  private upsertLocalSkillCatalogEntry(
+    skillPath: string,
+    name: string,
+    description: string | null,
+  ): void {
+    const skillKey = `local:${skillPath}`;
+    this.db
+      .query(
+        `INSERT INTO skills_catalog (
+          skill_key, source, origin, skill_id, name, description, path, scope, installs, updated_at
+        ) VALUES (?1, 'local', NULL, NULL, ?2, ?3, ?4, NULL, NULL, ?5)
+        ON CONFLICT(skill_key) DO UPDATE SET
+          name = excluded.name,
+          description = excluded.description,
+          path = excluded.path,
+          updated_at = excluded.updated_at`,
+      )
+      .run(skillKey, name, description, skillPath, Date.now());
   }
 
   private async refreshLocalSkills(): Promise<void> {

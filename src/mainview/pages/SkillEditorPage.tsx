@@ -162,7 +162,7 @@ export function SkillEditorPage() {
           content,
         });
         console.log("[save] created:", created.skill.key);
-        await refreshSkills(true);
+        await refreshSkills(false);
         navigate(`/skill/${encodeURIComponent(created.skill.key)}`);
         return;
       }
@@ -180,7 +180,7 @@ export function SkillEditorPage() {
       setName(updated.name || updated.skill.name);
       setDescription(updated.description || "");
       setContent(updated.content || "");
-      await refreshSkills(true);
+      await refreshSkills(false);
 
       if (updated.skill.key !== skillKey) {
         navigate(`/skill/${encodeURIComponent(updated.skill.key)}`);
@@ -198,7 +198,7 @@ export function SkillEditorPage() {
   }
 
   return (
-    <section className="p-7 md:p-9 max-w-6xl mx-auto h-full flex flex-col">
+    <section className="p-7 md:p-9 max-w-6xl mx-auto">
       <div className="flex items-start justify-between gap-4 mb-6">
         <div>
           <Link
@@ -256,7 +256,7 @@ export function SkillEditorPage() {
         </button>
       </div>
 
-      <div className="space-y-4 flex-1 min-h-0">
+      <div className="space-y-4">
         <div className="space-y-1.5">
           <label className="text-xs text-gray-400">Skill Name</label>
           <input
@@ -281,12 +281,12 @@ export function SkillEditorPage() {
           />
         </div>
 
-        <div className="space-y-1.5 h-[calc(100%-166px)] min-h-[420px]">
+        <div className="space-y-1.5 min-h-[420px]">
           <label className="text-xs text-gray-400">Skill Content (Markdown)</label>
           <textarea
             value={content}
             onChange={(event) => setContent(event.target.value)}
-            className="w-full h-full bg-[#121212] border border-gray-800 rounded-lg px-4 py-3 text-sm text-gray-100 font-mono resize-none"
+            className="w-full min-h-[400px] bg-[#121212] border border-gray-800 rounded-lg px-4 py-3 text-sm text-gray-100 font-mono resize-y"
             placeholder={"## Instructions\n\nWrite your skill content here..."}
           />
         </div>
