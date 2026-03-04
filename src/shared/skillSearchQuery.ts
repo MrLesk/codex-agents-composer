@@ -2,12 +2,37 @@ function normalizeText(input: string): string {
   return input.trim().toLowerCase();
 }
 
+function withCompactSlashes(input: string): string {
+  return input.replace(/\s*\/\s*/g, "/");
+}
+
+function withHyphenatedSpaces(input: string): string {
+  return input.replace(/\s+/g, "-").replace(/-+/g, "-");
+}
+
+function isUrlLike(input: string): boolean {
+  return /^(?:[a-z][a-z0-9+.-]*:\/\/|www\.)/i.test(input);
+}
+
+function shouldHyphenate(input: string): boolean {
+  if (isUrlLike(input)) {
+    return false;
+  }
+
+  // Keep owner/repo and slash-based queries intact.
+  if (input.includes("/")) {
+    return false;
+  }
+
+  return true;
+}
+
 function stripGitSuffix(repo: string): string {
   return repo.replace(/\.git$/i, "");
 }
 
 function extractGithubOwnerRepo(input: string): string | null {
-  const normalized = normalizeText(input);
+  const normalized = withCompactSlashes(normalizeText(input));
   if (!normalized) return null;
 
   const githubUrlMatch = normalized.match(
@@ -72,6 +97,15 @@ export function buildSkillSearchQueryVariants(query: string): string[] {
   const variants = new Set<string>();
   variants.add(normalized);
 
+  const compacted = withCompactSlashes(normalized);
+  if (compacted !== normalized) {
+    variants.add(compacted);
+  }
+
+  if (shouldHyphenate(compacted)) {
+    variants.add(withHyphenatedSpaces(compacted));
+  }
+
   const ownerRepo = extractGithubOwnerRepo(normalized);
   if (ownerRepo) {
     variants.add(ownerRepo);
@@ -84,5 +118,13 @@ export function resolveSkillSearchLookupQuery(query: string): string {
   const normalized = normalizeText(query);
   if (!normalized) return "";
 
-  return extractGithubOwnerRepo(normalized) || normalized;
+  const ownerRepo = extractGithubOwnerRepo(normalized);
+  if (ownerRepo) {
+    return ownerRepo;
+  }
+
+  const compacted = withCompactSlashes(normalized);
+  return shouldHyphenate(compacted)
+    ? withHyphenatedSpaces(compacted)
+    : compacted;
 }
