@@ -5,7 +5,6 @@ import {
   Loader2,
   Pencil,
   Plus,
-  RefreshCw,
 } from "lucide-react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router";
 import { useCallback, useState } from "react";
@@ -39,12 +38,13 @@ function formatReasoningLabel(reasoningEffort: string): string {
 export function Sidebar() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { agents, assignSkillToAgent, assigningAgentId, refreshAll } = useManager();
+  const { agents, assignSkillToAgent, assigningAgentId } = useManager();
   const [activeDropAgentId, setActiveDropAgentId] = useState<string | null>(null);
-  const [refreshing, setRefreshing] = useState(false);
   const [expandedAgentId, setExpandedAgentId] = useState<string | null>(null);
   const [skillsByAgentId, setSkillsByAgentId] = useState<Record<string, Skill[]>>({});
   const [loadingSkillsAgentId, setLoadingSkillsAgentId] = useState<string | null>(null);
+
+  const showSidebarDropHint = location.pathname === "/";
 
   const loadAgentSkills = useCallback(
     async (agentId: string, force = false) => {
@@ -89,17 +89,6 @@ export function Sidebar() {
     }
   };
 
-  const refresh = async () => {
-    setRefreshing(true);
-    try {
-      await refreshAll(true);
-      setSkillsByAgentId({});
-      setExpandedAgentId(null);
-    } finally {
-      setRefreshing(false);
-    }
-  };
-
   const toggleAccordion = (agentId: string) => {
     setExpandedAgentId((current) => {
       const next = current === agentId ? null : agentId;
@@ -130,16 +119,6 @@ export function Sidebar() {
               <p className="text-[11px] text-gray-500">Create specialized codex agents.</p>
             </div>
           </Link>
-          <button
-            type="button"
-            onClick={refresh}
-            className="p-2 rounded-lg border border-gray-800 text-gray-400 hover:text-gray-200 hover:border-gray-700 transition-colors"
-            title="Refresh"
-          >
-            <RefreshCw
-              className={clsx("w-4 h-4", refreshing && "animate-spin")}
-            />
-          </button>
         </div>
       </div>
 
@@ -198,15 +177,17 @@ export function Sidebar() {
                 </div>
               </Link>
 
-              <div className="mt-3 rounded-lg border border-gray-800/80 bg-black/20 px-2.5 py-1.5 text-[11px] text-gray-500 flex items-center justify-between">
-                <span className="truncate">Drop skills here to assign</span>
-                {isAssigning ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
-              </div>
+              {showSidebarDropHint ? (
+                <div className="mt-3 rounded-lg border border-gray-800/80 bg-black/20 px-2.5 py-1.5 text-[11px] text-gray-500 flex items-center justify-between">
+                  <span className="truncate">Drop skills here to assign</span>
+                  {isAssigning ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
+                </div>
+              ) : null}
 
               <button
                 type="button"
                 onClick={() => toggleAccordion(agent.id)}
-                className="mt-2 w-full rounded-lg border border-gray-800/80 bg-[#0f0f0f] px-2.5 py-1.5 text-[11px] text-gray-400 hover:text-gray-200 hover:border-gray-700 transition-colors inline-flex items-center justify-between"
+                className="mt-2 w-full rounded-lg border border-gray-800/80 bg-[#0f0f0f] px-2.5 py-1.5 text-[11px] text-gray-400 hover:text-gray-200 hover:border-gray-700 transition-colors inline-flex items-center justify-between cursor-pointer"
               >
                 <span className="inline-flex items-center gap-1.5">
                   {isExpanded ? (
@@ -237,7 +218,7 @@ export function Sidebar() {
                         <button
                           type="button"
                           onClick={() => openSkillEditor(skill.key)}
-                          className="text-[11px] text-gray-200 truncate text-left hover:text-white"
+                          className="text-[11px] text-gray-200 truncate text-left hover:text-white cursor-pointer"
                           title={skill.key}
                         >
                           {skill.name}
@@ -245,7 +226,7 @@ export function Sidebar() {
                         <button
                           type="button"
                           onClick={() => openSkillEditor(skill.key)}
-                          className="shrink-0 inline-flex items-center gap-1 text-[10px] px-2 py-1 rounded-md border border-gray-700 text-gray-300 hover:text-white hover:border-blue-500/50 transition-colors"
+                          className="shrink-0 inline-flex items-center gap-1 text-[10px] px-2 py-1 rounded-md border border-gray-700 text-gray-300 hover:text-white hover:border-blue-500/50 transition-colors cursor-pointer"
                         >
                           <Pencil className="w-3 h-3" />
                           Edit

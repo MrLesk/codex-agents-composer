@@ -11,6 +11,7 @@ import type {
   BootstrapPayload,
   CreateAgentInput,
   CreateSkillInput,
+  SaveSkillInput,
   ModelRecord,
   ReasoningEffort,
   SkillDocument,
@@ -70,6 +71,14 @@ interface AgentConfigFile {
   model?: string;
   model_reasoning_effort?: ReasoningEffort;
   developer_instructions?: string;
+}
+
+interface SkillMarkdownParts {
+  frontmatter: Record<string, unknown>;
+  name: string;
+  description: string;
+  content: string;
+  markdown: string;
 }
 
 const RESERVED_AGENT_KEYS = new Set(["max_threads", "max_depth"]);
@@ -413,13 +422,15 @@ export class ManagerStore {
       throw new Error(`Skill '${skillKey}' not found`);
     }
 
+    let markdown = "";
+
     if (skill.source === "remote") {
       const remoteMarkdown =
         skill.origin && skill.skillId
           ? await this.fetchRemoteSkillMarkdown(skill.origin, skill.skillId)
           : null;
 
-      const fallbackMarkdown = [
+      markdown = remoteMarkdown || [
         `# ${skill.name}`,
         "",
         "Remote skill preview is not available yet for this repository layout.",
@@ -428,36 +439,23 @@ export class ManagerStore {
           ? `Try opening: https://github.com/${skill.origin}/tree/main/skills/${skill.skillId}`
           : "",
       ].filter(Boolean).join("\n");
-
-      return {
-        skill,
-        markdown: remoteMarkdown || fallbackMarkdown,
-        editable: false,
-      };
+    } else if (skill.path) {
+      try {
+        markdown = await readFile(skill.path, "utf8");
+      } catch {
+        markdown = "";
+      }
     }
 
-    if (!skill.path) {
-      return {
-        skill,
-        markdown: "",
-        editable: false,
-      };
-    }
+    const parsed = this.parseSkillMarkdown(markdown, skill.name);
 
-    try {
-      const markdown = await readFile(skill.path, "utf8");
-      return {
-        skill,
-        markdown,
-        editable: true,
-      };
-    } catch {
-      return {
-        skill,
-        markdown: "",
-        editable: false,
-      };
-    }
+    return {
+      skill,
+      markdown: parsed.markdown,
+      name: parsed.name,
+      description: parsed.description,
+      content: parsed.content,
+    };
   }
 
   private async fetchRemoteSkillMarkdown(
@@ -597,25 +595,49 @@ export class ManagerStore {
     }
   }
 
-  async saveSkillDocument(skillKey: string, markdown: string): Promise<SkillDocument> {
+  async saveSkillDocument(skillKey: string, input: SaveSkillInput): Promise<SkillDocument> {
     const document = await this.getSkillDocument(skillKey);
 
-    if (!document.editable || !document.skill.path) {
-      throw new Error("This skill is read-only and cannot be edited");
+    const nextName = (input.name || document.name || document.skill.name).trim();
+    if (!nextName) {
+      throw new Error("Skill name is required");
     }
 
-    await mkdir(path.dirname(document.skill.path), { recursive: true });
-    await writeFile(document.skill.path, markdown, "utf8");
+    const nextDescription = input.description || "";
+    const nextContent = input.content || "";
+    const current = this.parseSkillMarkdown(document.markdown, nextName);
 
+    const markdown = this.serializeSkillMarkdown({
+      frontmatter: current.frontmatter,
+      name: nextName,
+      description: nextDescription,
+      content: nextContent,
+    });
+
+    if (document.skill.source === "remote") {
+      const baseSlug = this.sanitizeSkillName(nextName || document.skill.skillId || document.skill.name);
+      if (!baseSlug) {
+        throw new Error("Unable to determine local skill name");
+      }
+
+      const { skillPath } = await this.resolveNextLocalSkillPath(baseSlug);
+      await mkdir(path.dirname(skillPath), { recursive: true });
+      await writeFile(skillPath, markdown, "utf8");
+      await this.refreshLocalSkills();
+
+      return this.getSkillDocument(`local:${skillPath}`);
+    }
+
+    const localPath = document.skill.path;
+    if (!localPath) {
+      throw new Error("Local skill path is missing");
+    }
+
+    await mkdir(path.dirname(localPath), { recursive: true });
+    await writeFile(localPath, markdown, "utf8");
     await this.refreshLocalSkills();
 
-    const refreshed = this.resolveSkillRecord(skillKey) || document.skill;
-
-    return {
-      skill: refreshed,
-      markdown,
-      editable: true,
-    };
+    return this.getSkillDocument(`local:${localPath}`);
   }
 
   async createSkill(input: CreateSkillInput): Promise<SkillDocument> {
@@ -640,28 +662,25 @@ export class ManagerStore {
       }
     }
 
-    const markdown =
-      input.markdown?.trim().length
-        ? input.markdown
-        : this.buildDefaultSkillTemplate(slug);
+    const content =
+      input.content?.trim().length
+        ? input.content
+        : this.buildDefaultSkillContent();
+
+    const markdown = this.serializeSkillMarkdown({
+      frontmatter: {},
+      name: input.name.trim() || slug,
+      description: input.description || "",
+      content,
+    });
 
     await mkdir(skillDir, { recursive: true });
-    await writeFile(skillPath, `${markdown.trimEnd()}\n`, "utf8");
+    await writeFile(skillPath, markdown, "utf8");
 
     await this.refreshLocalSkills();
 
     const skillKey = `local:${skillPath}`;
-    const skill = this.findSkillRecord(skillKey);
-
-    if (!skill) {
-      throw new Error("Skill was created but not discovered in local catalog");
-    }
-
-    return {
-      skill,
-      markdown: `${markdown.trimEnd()}\n`,
-      editable: true,
-    };
+    return this.getSkillDocument(skillKey);
   }
 
   private async getAgent(agentId: string): Promise<AgentRecord | null> {
@@ -1312,8 +1331,94 @@ export class ManagerStore {
     return cleaned;
   }
 
-  private buildDefaultSkillTemplate(skillName: string): string {
-    return `# ${skillName}\n\nDescribe what this skill does and when to use it.\n\n## Instructions\n\n1. Add clear, direct instructions for the agent.\n2. Include any constraints and expected output format.\n3. Add examples if needed.\n`;
+  private buildDefaultSkillContent(): string {
+    return `Describe what this skill does and when to use it.\n\n## Instructions\n\n1. Add clear, direct instructions for the agent.\n2. Include any constraints and expected output format.\n3. Add examples if needed.\n`;
+  }
+
+  private parseSkillMarkdown(markdown: string, fallbackName: string): SkillMarkdownParts {
+    const normalized = (markdown || "").replace(/\r\n/g, "\n");
+    const match = normalized.match(/^---\n([\s\S]*?)\n---(?:\n|$)/);
+
+    let frontmatter: Record<string, unknown> = {};
+    let content = normalized;
+
+    if (match) {
+      const frontmatterRaw = match[1] || "";
+      try {
+        const parsed = Bun.YAML.parse(frontmatterRaw);
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          frontmatter = { ...(parsed as Record<string, unknown>) };
+        }
+      } catch {
+        frontmatter = {};
+      }
+      content = normalized.slice(match[0].length);
+    }
+
+    const parsedName = typeof frontmatter.name === "string" ? frontmatter.name.trim() : "";
+    const name = parsedName || fallbackName;
+    const description =
+      typeof frontmatter.description === "string" ? frontmatter.description : "";
+
+    const serialized = this.serializeSkillMarkdown({
+      frontmatter,
+      name,
+      description,
+      content,
+    });
+
+    return {
+      frontmatter,
+      name,
+      description,
+      content,
+      markdown: serialized,
+    };
+  }
+
+  private serializeSkillMarkdown(input: {
+    frontmatter: Record<string, unknown>;
+    name: string;
+    description: string;
+    content: string;
+  }): string {
+    const frontmatter: Record<string, unknown> = {
+      ...input.frontmatter,
+      name: input.name.trim(),
+      description: input.description,
+    };
+
+    const yaml = Bun.YAML.stringify(frontmatter).trimEnd();
+    const normalizedContent = (input.content || "")
+      .replace(/\r\n/g, "\n")
+      .replace(/^\n+/, "")
+      .trimEnd();
+
+    if (!normalizedContent) {
+      return `---\n${yaml}\n---\n`;
+    }
+
+    return `---\n${yaml}\n---\n\n${normalizedContent}\n`;
+  }
+
+  private async resolveNextLocalSkillPath(baseSlug: string): Promise<{ slug: string; skillPath: string }> {
+    let index = 0;
+
+    while (true) {
+      const slug = index === 0 ? baseSlug : `${baseSlug}-${index + 1}`;
+      const skillPath = path.join(this.codexHome, "skills", slug, "SKILL.md");
+
+      try {
+        await access(skillPath, fsConstants.F_OK);
+        index += 1;
+      } catch (error) {
+        const anyError = error as NodeJS.ErrnoException;
+        if (anyError.code === "ENOENT") {
+          return { slug, skillPath };
+        }
+        throw error;
+      }
+    }
   }
 
   private getMetadata(key: string): string | null {

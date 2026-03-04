@@ -333,11 +333,11 @@ export function AgentPage() {
         <button
           type="button"
           onClick={() => void handleSubmit(onSubmit)()}
-          disabled={saving}
+          disabled={saving || (!isCreate && !isDirty)}
           className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm inline-flex items-center gap-2 disabled:opacity-70 cursor-pointer"
         >
           {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-          {isCreate ? "Create" : isDirty ? "Save" : "Saved"}
+          {isCreate ? "Create" : "Save"}
         </button>
       </div>
 

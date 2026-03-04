@@ -65,10 +65,19 @@ export interface UpdateAgentInput {
 export interface SkillDocument {
   skill: SkillRecord;
   markdown: string;
-  editable: boolean;
+  name: string;
+  description: string;
+  content: string;
 }
 
 export interface CreateSkillInput {
   name: string;
-  markdown: string;
+  description: string;
+  content: string;
+}
+
+export interface SaveSkillInput {
+  name: string;
+  description: string;
+  content: string;
 }

@@ -2,6 +2,7 @@ import { ManagerStore } from "./store";
 import type {
   CreateAgentInput,
   CreateSkillInput,
+  SaveSkillInput,
   UpdateAgentInput,
 } from "./types";
 
@@ -22,6 +23,14 @@ function json(data: unknown, status = 200): Response {
 function asErrorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
   return String(error);
+}
+
+function parseSkillWriteInput(body: SaveSkillInput): SaveSkillInput {
+  return {
+    name: typeof body.name === "string" ? body.name : "",
+    description: typeof body.description === "string" ? body.description : "",
+    content: typeof body.content === "string" ? body.content : "",
+  };
 }
 
 export function startApiServer(store: ManagerStore, port: number) {
@@ -56,7 +65,7 @@ export function startApiServer(store: ManagerStore, port: number) {
         }
 
         if (request.method === "POST" && pathname === "/api/skills") {
-          const input = (await request.json()) as CreateSkillInput;
+          const input = parseSkillWriteInput((await request.json()) as CreateSkillInput);
           const document = await store.createSkill(input);
           return json({ document }, 201);
         }
@@ -75,11 +84,8 @@ export function startApiServer(store: ManagerStore, port: number) {
 
         if (request.method === "PUT" && skillMatch) {
           const skillKey = decodeURIComponent(skillMatch[1]);
-          const body = (await request.json()) as { markdown?: string };
-          if (typeof body.markdown !== "string") {
-            return json({ error: "markdown is required" }, 400);
-          }
-          const document = await store.saveSkillDocument(skillKey, body.markdown);
+          const input = parseSkillWriteInput((await request.json()) as SaveSkillInput);
+          const document = await store.saveSkillDocument(skillKey, input);
           return json({ document });
         }
 

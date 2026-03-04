@@ -17,7 +17,9 @@ export interface Skill {
 export interface SkillDocument {
   skill: Skill;
   markdown: string;
-  editable: boolean;
+  name: string;
+  description: string;
+  content: string;
 }
 
 export interface Agent {
@@ -70,5 +72,12 @@ export interface UpdateAgentInput {
 
 export interface CreateSkillInput {
   name: string;
-  markdown: string;
+  description: string;
+  content: string;
+}
+
+export interface SaveSkillInput {
+  name: string;
+  description: string;
+  content: string;
 }

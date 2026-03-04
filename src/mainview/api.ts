@@ -4,6 +4,7 @@ import type {
   BootstrapPayload,
   CreateAgentInput,
   CreateSkillInput,
+  SaveSkillInput,
   Skill,
   SkillDocument,
   UpdateAgentInput,
@@ -108,13 +109,13 @@ export async function fetchSkillDocument(skillKey: string): Promise<SkillDocumen
 
 export async function saveSkillDocument(
   skillKey: string,
-  markdown: string,
+  input: SaveSkillInput,
 ): Promise<SkillDocument> {
   const result = await request<{ document: SkillDocument }>(
     `/api/skills/${encodeURIComponent(skillKey)}`,
     {
       method: "PUT",
-      body: JSON.stringify({ markdown }),
+      body: JSON.stringify(input),
     },
   );
   return result.document;
