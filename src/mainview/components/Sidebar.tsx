@@ -1,17 +1,11 @@
-import {
-  Bot,
-  ChevronDown,
-  ChevronRight,
-  Loader2,
-  Pencil,
-  Plus,
-} from "lucide-react";
+import { ChevronDown, ChevronRight, Loader2, Pencil, Plus } from "lucide-react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router";
 import { useCallback, useState } from "react";
 import { clsx } from "clsx";
 import { fetchAgentDetail } from "../api";
 import { useManager } from "../context/ManagerContext";
 import type { Skill } from "../types";
+import appLogo from "../assets/app-logo.png";
 
 const SKILL_MIME_TYPE = "application/x-codex-skill";
 
@@ -111,8 +105,8 @@ export function Sidebar() {
             to="/"
             className="flex items-center gap-2.5 rounded-lg -mx-1 px-1 py-0.5 hover:bg-white/5 transition-colors"
           >
-            <div className="w-8 h-8 rounded-lg bg-blue-600/20 border border-blue-500/40 flex items-center justify-center">
-              <Bot className="w-4 h-4 text-blue-300" />
+            <div className="w-8 h-8 rounded-lg bg-blue-600/20 border border-blue-500/40 overflow-hidden">
+              <img src={appLogo} alt="Codex Agents Composer" className="w-full h-full object-cover" />
             </div>
             <div>
               <p className="text-gray-100 text-sm">Codex Agents Composer</p>
