@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
-import { ArrowLeft, Cloud, HardDrive, Loader2, Package, Save } from "lucide-react";
+import { ArrowLeft, ChevronDown, Cloud, HardDrive, Loader2, Package, Save, TriangleAlert } from "lucide-react";
 import { createSkill, fetchSkillDocument, saveSkillDocument } from "../api";
 import { useManager } from "../context/ManagerContext";
 import type { SkillDocument } from "../types";
@@ -45,7 +45,7 @@ function parseFallbackFromMarkdown(markdown: string, fallbackName: string): {
 export function SkillEditorPage() {
   const { skillKey } = useParams<{ skillKey: string }>();
   const navigate = useNavigate();
-  const { refreshSkills } = useManager();
+  const { refreshSkills, deleteSkillByKey } = useManager();
   const isNew = !skillKey || skillKey === "new";
 
   const [loading, setLoading] = useState(!isNew);
@@ -55,6 +55,9 @@ export function SkillEditorPage() {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [content, setContent] = useState("");
+  const [dangerOpen, setDangerOpen] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
+  const [deletingSkill, setDeletingSkill] = useState(false);
 
   useEffect(() => {
     if (isNew || !skillKey) {
@@ -113,6 +116,21 @@ export function SkillEditorPage() {
     if (isNew) return "Create Skill";
     return isRemoteSkill ? "Save Locally" : "Save";
   }, [isNew, isRemoteSkill]);
+
+  const isLocalSkill = !isNew && document?.skill.source === "local";
+  const deleteTargetName = name || document?.skill.name || "";
+  const canDelete = isLocalSkill && deleteTargetName.length > 0 && deleteConfirmText.trim() === deleteTargetName;
+
+  const onDeleteSkill = async () => {
+    if (!skillKey || !canDelete) return;
+    setDeletingSkill(true);
+    try {
+      await deleteSkillByKey(skillKey);
+      navigate("/", { replace: true });
+    } finally {
+      setDeletingSkill(false);
+    }
+  };
 
   const canDragToAssign = !isNew && Boolean(document?.skill.key);
 
@@ -273,6 +291,61 @@ export function SkillEditorPage() {
           />
         </div>
       </div>
+
+      {isLocalSkill ? (
+        <div className="mt-8 rounded-xl border border-rose-500/30 bg-rose-950/10">
+          <button
+            type="button"
+            onClick={() => setDangerOpen((open) => !open)}
+            className="w-full px-4 py-3 inline-flex items-center justify-between text-sm text-rose-300 hover:text-rose-200 cursor-pointer"
+          >
+            <span className="inline-flex items-center gap-2">
+              <TriangleAlert className="w-4 h-4" />
+              Danger Zone
+            </span>
+            <ChevronDown className={dangerOpen ? "w-4 h-4 rotate-180" : "w-4 h-4"} />
+          </button>
+
+          {dangerOpen ? (
+            <div className="border-t border-rose-500/20 px-4 py-4 space-y-3">
+              <p className="text-xs text-gray-300">
+                Deleting this skill removes the file from disk and unassigns it from all agents.
+              </p>
+              <p className="text-xs text-gray-400">
+                To confirm, type <span className="font-mono text-gray-200">{deleteTargetName}</span> below.
+              </p>
+
+              <input
+                value={deleteConfirmText}
+                onChange={(event) => setDeleteConfirmText(event.target.value)}
+                placeholder="Type skill name to confirm"
+                className="w-full bg-[#161616] border border-rose-500/40 rounded-lg h-10 px-3 text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:border-rose-400/70"
+              />
+
+              <div className="flex items-center justify-end gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDangerOpen(false);
+                    setDeleteConfirmText("");
+                  }}
+                  className="px-3 py-1.5 rounded-lg border border-gray-700 text-sm text-gray-300 hover:text-white hover:border-gray-600 cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void onDeleteSkill()}
+                  disabled={!canDelete || deletingSkill}
+                  className="px-3 py-1.5 rounded-lg border border-rose-500/50 bg-rose-600/20 text-sm text-rose-200 hover:bg-rose-600/30 disabled:opacity-50 cursor-pointer"
+                >
+                  {deletingSkill ? "Deleting..." : "Delete Skill"}
+                </button>
+              </div>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
     </section>
   );
 }

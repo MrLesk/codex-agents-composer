@@ -78,6 +78,12 @@ export async function deleteAgent(agentId: string): Promise<void> {
   });
 }
 
+export async function deleteSkill(skillKey: string): Promise<void> {
+  await request<{ ok: true }>(`/api/skills/${encodeURIComponent(skillKey)}`, {
+    method: "DELETE",
+  });
+}
+
 export async function assignSkill(agentId: string, skillKey: string): Promise<Skill[]> {
   const result = await request<{ assignedSkills: Skill[] }>(
     `/api/agents/${encodeURIComponent(agentId)}/assign`,

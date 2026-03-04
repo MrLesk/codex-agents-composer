@@ -135,6 +135,12 @@ export function startApiServer(store: ManagerStore, port: number) {
           return json({ document });
         }
 
+        if (request.method === "DELETE" && skillMatch) {
+          const skillKey = decodeURIComponent(skillMatch[1]);
+          await store.deleteSkill(skillKey);
+          return json({ ok: true });
+        }
+
         const agentDetailMatch = pathname.match(/^\/api\/agents\/([^/]+)$/);
         if (request.method === "GET" && agentDetailMatch) {
           const agentId = decodeURIComponent(agentDetailMatch[1]);

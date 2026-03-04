@@ -10,6 +10,7 @@ import {
 import {
   assignSkill,
   deleteAgent,
+  deleteSkill,
   fetchBootstrap,
   fetchSkills,
   unassignSkill,
@@ -28,6 +29,7 @@ interface ManagerContextValue {
   assignSkillToAgent: (agentId: string, skillKey: string) => Promise<Skill[]>;
   unassignSkillFromAgent: (agentId: string, skillKey: string) => Promise<Skill[]>;
   deleteAgentById: (agentId: string) => Promise<void>;
+  deleteSkillByKey: (skillKey: string) => Promise<void>;
   upsertAgent: (agent: Agent, previousId?: string) => void;
 }
 
@@ -131,6 +133,18 @@ export function ManagerProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const deleteSkillByKey = useCallback(async (skillKey: string) => {
+    setError(null);
+    try {
+      await deleteSkill(skillKey);
+      setSkills((prev) => prev.filter((s) => s.key !== skillKey));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setError(message);
+      throw err;
+    }
+  }, []);
+
   const upsertAgent = useCallback((nextAgent: Agent, previousId?: string) => {
     setAgents((prev) => {
       const base = previousId
@@ -163,6 +177,7 @@ export function ManagerProvider({ children }: { children: ReactNode }) {
       assignSkillToAgent,
       unassignSkillFromAgent,
       deleteAgentById,
+      deleteSkillByKey,
       upsertAgent,
     }),
     [
@@ -177,6 +192,7 @@ export function ManagerProvider({ children }: { children: ReactNode }) {
       assignSkillToAgent,
       unassignSkillFromAgent,
       deleteAgentById,
+      deleteSkillByKey,
       upsertAgent,
     ],
   );

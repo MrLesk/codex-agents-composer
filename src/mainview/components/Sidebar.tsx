@@ -1,6 +1,6 @@
 import { ChevronDown, ChevronRight, Loader2, Pencil, Plus } from "lucide-react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { clsx } from "clsx";
 import { fetchAgentDetail } from "../api";
 import { useManager } from "../context/ManagerContext";
@@ -40,13 +40,31 @@ export function Sidebar() {
 
   const showSidebarDropHint = location.pathname === "/";
 
+  // Invalidate cached skills when agents change (e.g. skills assigned/unassigned from AgentPage)
+  const prevAgentsRef = useRef(agents);
+  useEffect(() => {
+    const prev = prevAgentsRef.current;
+    prevAgentsRef.current = agents;
+
+    if (prev === agents) return;
+
+    const changed = agents.some((agent) => {
+      const old = prev.find((a) => a.id === agent.id);
+      return old && old.skillCount !== agent.skillCount;
+    });
+
+    if (changed) {
+      setSkillsByAgentId({});
+    }
+  }, [agents]);
+
   const loadAgentSkills = useCallback(
-    async (agentId: string, force = false) => {
-      if (!force && skillsByAgentId[agentId]) {
-        return;
+    async (agentId: string) => {
+      // Only show loading spinner when there's no cached data to display
+      if (!skillsByAgentId[agentId]) {
+        setLoadingSkillsAgentId(agentId);
       }
 
-      setLoadingSkillsAgentId(agentId);
       try {
         const detail = await fetchAgentDetail(agentId);
         setSkillsByAgentId((prev) => ({
@@ -82,6 +100,13 @@ export function Sidebar() {
       console.error("Failed to assign skill via drag/drop", error);
     }
   };
+
+  // Re-fetch skills for the expanded agent when cache is invalidated
+  useEffect(() => {
+    if (expandedAgentId && !skillsByAgentId[expandedAgentId]) {
+      void loadAgentSkills(expandedAgentId);
+    }
+  }, [expandedAgentId, skillsByAgentId, loadAgentSkills]);
 
   const toggleAccordion = (agentId: string) => {
     setExpandedAgentId((current) => {

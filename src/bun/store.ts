@@ -311,6 +311,40 @@ export class ManagerStore {
     }
   }
 
+  async deleteSkill(skillKey: string): Promise<void> {
+    const skill = this.findSkillRecord(skillKey);
+    if (!skill) {
+      throw new Error(`Skill '${skillKey}' not found`);
+    }
+    if (skill.source !== "local") {
+      throw new Error("Cannot delete a remote skill");
+    }
+
+    // Delete the skill file from disk
+    if (skill.path) {
+      try {
+        await unlink(skill.path);
+        // Remove parent directory if empty
+        const dir = path.dirname(skill.path);
+        const { readdir } = await import("node:fs/promises");
+        const entries = await readdir(dir);
+        if (entries.length === 0) {
+          const { rmdir } = await import("node:fs/promises");
+          await rmdir(dir);
+        }
+      } catch {
+        // Ignore cleanup errors
+      }
+    }
+
+    // Remove from agent_skills (unassign from all agents)
+    this.db.query("DELETE FROM agent_skills WHERE skill_key = ?1").run(skillKey);
+    // Remove from skills_catalog
+    this.db.query("DELETE FROM skills_catalog WHERE skill_key = ?1").run(skillKey);
+
+    await this.refreshLocalSkills();
+  }
+
   async assignSkill(agentId: string, skillKey: string): Promise<SkillRecord[]> {
     const agent = await this.getAgent(agentId);
     if (!agent) {
