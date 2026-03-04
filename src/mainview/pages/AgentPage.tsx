@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router";
 import { useForm } from "react-hook-form";
-import { ArrowLeft, ChevronDown, Loader2, Save, Search, TriangleAlert } from "lucide-react";
+import { ArrowLeft, ChevronDown, Loader2, Plus, Save, Search, TriangleAlert } from "lucide-react";
 import { createAgent, fetchAgentDetail, updateAgent } from "../api";
 import { SkillCard } from "../components/SkillCard";
 import { useManager } from "../context/ManagerContext";
@@ -447,6 +447,16 @@ export function AgentPage() {
                 />
               ))
             )}
+          </div>
+          <div className="px-3 pb-3 border-t border-gray-800">
+            <button
+              type="button"
+              onClick={() => navigate("/skill/new")}
+              className="mt-3 w-full h-9 rounded-lg border border-blue-500/40 bg-blue-500/10 text-blue-300 hover:bg-blue-500/20 text-sm inline-flex items-center justify-center gap-1.5 cursor-pointer"
+            >
+              <Plus className="w-4 h-4" />
+              Create New Skill
+            </button>
           </div>
         </div>
 
