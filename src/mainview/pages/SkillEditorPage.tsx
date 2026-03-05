@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router";
+import { Link, useLocation, useNavigate, useParams } from "react-router";
 import { ArrowLeft, Check, ChevronDown, Cloud, Copy, HardDrive, Loader2, Package, Save, TriangleAlert } from "lucide-react";
 import { createSkill, fetchSkillDocument, saveSkillDocument } from "../api";
 import { useManager } from "../context/ManagerContext";
@@ -10,9 +10,15 @@ const SKILL_MIME_TYPE = "application/x-codex-skill";
 
 export function SkillEditorPage() {
   const { skillKey } = useParams<{ skillKey: string }>();
+  const location = useLocation();
   const navigate = useNavigate();
-  const { refreshSkills, deleteSkillByKey } = useManager();
+  const { refreshSkills, deleteSkillByKey, assignSkillToAgent } = useManager();
   const isNew = !skillKey || skillKey === "new";
+  const searchParams = new URLSearchParams(location.search);
+  const assignToAgentId = searchParams.get("assignToAgentId")?.trim() || null;
+  const returnTo = searchParams.get("returnTo")?.trim() || "";
+  const backHref = returnTo || "/";
+  const backLabel = backHref.startsWith("/agent/") ? "Back to agent" : "Back to catalog";
 
   const [loading, setLoading] = useState(!isNew);
   const [saving, setSaving] = useState(false);
@@ -82,7 +88,7 @@ export function SkillEditorPage() {
     setDeletingSkill(true);
     try {
       await deleteSkillByKey(skillKey);
-      navigate("/", { replace: true });
+      navigate(backHref, { replace: true });
     } finally {
       setDeletingSkill(false);
     }
@@ -151,6 +157,14 @@ export function SkillEditorPage() {
           description,
           content,
         });
+        if (assignToAgentId) {
+          await assignSkillToAgent(assignToAgentId, created.skill.key);
+        }
+        if (returnTo) {
+          navigate(returnTo, { replace: true });
+          void refreshSkills(false);
+          return;
+        }
         await refreshSkills(false);
         navigate(`/skill/${encodeURIComponent(created.skill.key)}`);
         return;
@@ -188,11 +202,11 @@ export function SkillEditorPage() {
       <div className="flex items-start justify-between gap-4 mb-6">
         <div>
           <Link
-            to="/"
+            to={backHref}
             className="text-xs text-gray-400 hover:text-gray-200 inline-flex items-center gap-1"
           >
             <ArrowLeft className="w-3 h-3" />
-            Back to catalog
+            {backLabel}
           </Link>
           <h1 className="text-2xl mt-2">
             {isNew ? "Create Skill" : `Skill Editor · ${name || skillKey || "unknown"}`}

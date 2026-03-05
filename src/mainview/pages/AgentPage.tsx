@@ -167,6 +167,10 @@ export function AgentPage() {
 
   const deleteTargetId = agentId || "";
   const canDelete = !isCreate && deleteTargetId.length > 0 && deleteConfirmText.trim() === deleteTargetId;
+  const createSkillHref =
+    !isCreate && agentId
+      ? `/skill/new?assignToAgentId=${encodeURIComponent(agentId)}&returnTo=${encodeURIComponent(`${location.pathname}${location.search}`)}`
+      : "/skill/new";
 
   const onSubmit = async (formValues: AgentFormValues) => {
     setSaving(true);
@@ -502,7 +506,7 @@ export function AgentPage() {
           <div className="px-3 pb-3 border-t border-gray-800">
             <button
               type="button"
-              onClick={() => navigate("/skill/new")}
+              onClick={() => navigate(createSkillHref)}
               className="mt-3 w-full h-9 rounded-lg border border-blue-500/40 bg-blue-500/10 text-blue-300 hover:bg-blue-500/20 text-sm inline-flex items-center justify-center gap-1.5 cursor-pointer"
             >
               <Plus className="w-4 h-4" />

@@ -407,7 +407,11 @@ export function Sidebar() {
 
                   <button
                     type="button"
-                    onClick={() => navigate("/skill/new")}
+                    onClick={() =>
+                      navigate(
+                        `/skill/new?assignToAgentId=${encodeURIComponent(agent.id)}&returnTo=${encodeURIComponent(`${location.pathname}${location.search}`)}`,
+                      )
+                    }
                     className="w-full inline-flex items-center justify-center gap-1.5 text-[11px] px-2 py-1.5 rounded-md border border-blue-500/40 bg-blue-500/10 text-blue-300 hover:bg-blue-500/20 transition-colors cursor-pointer"
                   >
                     <Plus className="w-3.5 h-3.5" />

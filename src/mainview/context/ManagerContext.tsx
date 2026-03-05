@@ -43,20 +43,24 @@ export function ManagerProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<string | null>(null);
   const [assigningAgentId, setAssigningAgentId] = useState<string | null>(null);
 
+  const syncBootstrapSnapshot = useCallback(async (refreshRemote = false) => {
+    const payload = await fetchBootstrap(refreshRemote);
+    setAgents(payload.agents);
+    setSkills(payload.skills);
+    setModels(payload.models);
+  }, []);
+
   const refreshAll = useCallback(async (refreshRemote = false) => {
     setLoading(true);
     setError(null);
     try {
-      const payload = await fetchBootstrap(refreshRemote);
-      setAgents(payload.agents);
-      setSkills(payload.skills);
-      setModels(payload.models);
+      await syncBootstrapSnapshot(refreshRemote);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [syncBootstrapSnapshot]);
 
   const refreshSkillsOnly = useCallback(async (refreshRemote = false) => {
     setError(null);
@@ -138,13 +142,13 @@ export function ManagerProvider({ children }: { children: ReactNode }) {
     setError(null);
     try {
       await deleteSkill(skillKey);
-      setSkills((prev) => prev.filter((s) => s.key !== skillKey));
+      await syncBootstrapSnapshot(false);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       setError(message);
       throw err;
     }
-  }, []);
+  }, [syncBootstrapSnapshot]);
 
   const upsertAgent = useCallback((nextAgent: Agent, previousId?: string) => {
     setAgents((prev) => {
