@@ -3,44 +3,10 @@ import { Link, useNavigate, useParams } from "react-router";
 import { ArrowLeft, Check, ChevronDown, Cloud, Copy, HardDrive, Loader2, Package, Save, TriangleAlert } from "lucide-react";
 import { createSkill, fetchSkillDocument, saveSkillDocument } from "../api";
 import { useManager } from "../context/ManagerContext";
+import { clearActiveSkillDrag, setActiveSkillDrag } from "../skillDragState";
 import type { SkillDocument } from "../types";
 
 const SKILL_MIME_TYPE = "application/x-codex-skill";
-
-function parseFallbackFromMarkdown(markdown: string, fallbackName: string): {
-  name: string;
-  description: string;
-  content: string;
-} {
-  const normalized = (markdown || "").replace(/\r\n/g, "\n");
-  const match = normalized.match(/^---\n([\s\S]*?)\n---(?:\n|$)/);
-
-  let name = fallbackName;
-  let description = "";
-  const content = match ? normalized.slice(match[0].length) : normalized;
-
-  if (match) {
-    const frontmatter = match[1] || "";
-    for (const rawLine of frontmatter.split("\n")) {
-      const line = rawLine.trim();
-      if (!line || line.startsWith("#")) continue;
-      const kv = line.match(/^([a-zA-Z0-9_-]+):\s*(.*)$/);
-      if (!kv) continue;
-
-      const key = kv[1].toLowerCase();
-      const value = kv[2].replace(/^['\"]|['\"]$/g, "").trim();
-
-      if (key === "name" && value) {
-        name = value;
-      }
-      if (key === "description") {
-        description = value;
-      }
-    }
-  }
-
-  return { name, description, content };
-}
 
 export function SkillEditorPage() {
   const { skillKey } = useParams<{ skillKey: string }>();
@@ -75,31 +41,10 @@ export function SkillEditorPage() {
     setLoadError(null);
     void fetchSkillDocument(skillKey)
       .then((nextDocument) => {
-        const fallback = parseFallbackFromMarkdown(
-          nextDocument.markdown || "",
-          nextDocument.skill.name,
-        );
-
-        const hasNameField = Object.prototype.hasOwnProperty.call(nextDocument, "name");
-        const hasDescriptionField = Object.prototype.hasOwnProperty.call(nextDocument, "description");
-        const hasContentField = Object.prototype.hasOwnProperty.call(nextDocument, "content");
-
         setDocument(nextDocument);
-        setName(
-          hasNameField && typeof nextDocument.name === "string"
-            ? nextDocument.name
-            : fallback.name,
-        );
-        setDescription(
-          hasDescriptionField && typeof nextDocument.description === "string"
-            ? nextDocument.description
-            : fallback.description,
-        );
-        setContent(
-          hasContentField && typeof nextDocument.content === "string"
-            ? nextDocument.content
-            : fallback.content,
-        );
+        setName(nextDocument.name);
+        setDescription(nextDocument.description);
+        setContent(nextDocument.content);
       })
       .catch((error) => {
         setDocument(null);
@@ -117,7 +62,16 @@ export function SkillEditorPage() {
     if (isNew) return "Create Skill";
     return isRemoteSkill ? "Save Locally" : "Save";
   }, [isNew, isRemoteSkill]);
-  const hasRequiredFields = name.trim().length > 0 && description.trim().length > 0;
+  const missingRequiredFields = [
+    name.trim() ? null : "name",
+    description.trim() ? null : "description",
+    content.trim() ? null : "instructions",
+  ].filter((field): field is string => field !== null);
+  const hasRequiredFields =
+    missingRequiredFields.length === 0;
+  const saveButtonTitle = hasRequiredFields
+    ? undefined
+    : `Fill in the required fields: ${missingRequiredFields.join(", ")}`;
 
   const isLocalSkill = !isNew && document?.skill.source === "local";
   const deleteTargetName = name || document?.skill.name || "";
@@ -138,11 +92,24 @@ export function SkillEditorPage() {
 
   const onSkillDragStart = (event: React.DragEvent<HTMLButtonElement>) => {
     if (!document?.skill.key) return;
+    setActiveSkillDrag({
+      skillKey: document.skill.key,
+      skillName: document.skill.name,
+      intent: "assign",
+    });
     event.dataTransfer.effectAllowed = "copy";
     event.dataTransfer.setData(
       SKILL_MIME_TYPE,
-      JSON.stringify({ skillKey: document.skill.key, intent: "assign" }),
+      JSON.stringify({
+        skillKey: document.skill.key,
+        skillName: document.skill.name,
+        intent: "assign",
+      }),
     );
+  };
+
+  const onSkillDragEnd = () => {
+    clearActiveSkillDrag();
   };
 
   const copyPath = async () => {
@@ -169,6 +136,11 @@ export function SkillEditorPage() {
       return;
     }
 
+    if (!content.trim()) {
+      setLoadError("Skill instructions are required");
+      return;
+    }
+
     setSaving(true);
     setLoadError(null);
 
@@ -192,9 +164,9 @@ export function SkillEditorPage() {
       });
 
       setDocument(updated);
-      setName(updated.name || updated.skill.name);
-      setDescription(updated.description || "");
-      setContent(updated.content || "");
+      setName(updated.name);
+      setDescription(updated.description);
+      setContent(updated.content);
       await refreshSkills(false);
 
       if (updated.skill.key !== skillKey) {
@@ -271,6 +243,7 @@ export function SkillEditorPage() {
               type="button"
               draggable
               onDragStart={onSkillDragStart}
+              onDragEnd={onSkillDragEnd}
               className="mt-2 inline-flex items-center gap-2 rounded-md border border-gray-700 bg-[#141414] px-2.5 py-1.5 text-xs text-gray-200 cursor-grab active:cursor-grabbing hover:border-blue-500/50"
               title="Drag to an agent in the sidebar to assign"
             >
@@ -289,7 +262,8 @@ export function SkillEditorPage() {
           type="button"
           onClick={() => void save()}
           disabled={saving || !hasRequiredFields}
-          className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm inline-flex items-center gap-2 disabled:opacity-70 cursor-pointer"
+          title={saveButtonTitle}
+          className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm inline-flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
         >
           {saving ? (
             <Loader2 className="w-4 h-4 animate-spin" />

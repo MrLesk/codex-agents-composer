@@ -6,6 +6,7 @@ import { createAgent, fetchAgentDetail, updateAgent } from "../api";
 import { SkillCard } from "../components/SkillCard";
 import { useManager } from "../context/ManagerContext";
 import { useSkillSearch } from "../hooks/useSkillSearch";
+import { getActiveSkillDrag } from "../skillDragState";
 import type { ModelOption, ReasoningEffort, Skill } from "../types";
 
 interface AgentFormValues {
@@ -55,6 +56,7 @@ export function AgentPage() {
   const [deletingAgent, setDeletingAgent] = useState(false);
   const [agentConfigPath, setAgentConfigPath] = useState<string | null>(null);
   const [configPathCopied, setConfigPathCopied] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   const {
     register,
@@ -121,6 +123,7 @@ export function AgentPage() {
     setDangerOpen(false);
     setDeleteConfirmText("");
     setConfigPathCopied(false);
+    setSaveError(null);
   }, [agentId, isCreate]);
 
   const selectedModelId = watch("model");
@@ -167,27 +170,19 @@ export function AgentPage() {
 
   const onSubmit = async (formValues: AgentFormValues) => {
     setSaving(true);
+    setSaveError(null);
     try {
       if (isCreate) {
-        const skillKeysToAssign = assignedSkills.map((skill) => skill.key);
         const created = await createAgent({
           name: formValues.name,
           description: formValues.description,
           model: formValues.model,
           reasoningEffort: formValues.reasoningEffort,
           instructions: formValues.instructions,
+          skillKeys: assignedSkills.map((skill) => skill.key),
         });
 
         upsertAgent(created);
-
-        for (const skillKey of skillKeysToAssign) {
-          try {
-            await assignSkillToAgent(created.id, skillKey);
-          } catch (error) {
-            console.error(`Failed to assign skill '${skillKey}' after create`, error);
-          }
-        }
-
         navigate(`/agent/${encodeURIComponent(created.id)}`);
       } else if (agentId) {
         const previousId = agentId;
@@ -211,6 +206,8 @@ export function AgentPage() {
         setAllSkills(refreshed.allSkills);
         setAgentConfigPath(refreshed.agent.configFile || null);
       }
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : String(error));
     } finally {
       setSaving(false);
     }
@@ -347,6 +344,11 @@ export function AgentPage() {
           <p className="text-sm text-gray-500 mt-1">
             Configure model, reasoning, and instructions. Skills are assigned below.
           </p>
+          {saveError ? (
+            <p className="mt-2 text-xs text-red-300 bg-red-500/10 border border-red-500/30 rounded-md px-2 py-1.5">
+              {saveError}
+            </p>
+          ) : null}
           {!isCreate && agentConfigPath ? (
             <div className="mt-2 flex flex-wrap items-center gap-2">
               <span className="shrink-0 text-[10px] uppercase tracking-wide text-gray-500">
@@ -458,7 +460,15 @@ export function AgentPage() {
               : "rounded-xl border border-gray-800 bg-[#121212]"
           }
           onDragOver={(event) => {
+            const dragIntent = getActiveSkillDrag()?.intent ?? null;
+            if (dragIntent !== "assign") {
+              event.dataTransfer.dropEffect = "none";
+              setIsDroppingOnAssigned(false);
+              return;
+            }
+
             event.preventDefault();
+            event.dataTransfer.dropEffect = "copy";
             setIsDroppingOnAssigned(true);
           }}
           onDragLeave={() => setIsDroppingOnAssigned(false)}
@@ -508,7 +518,15 @@ export function AgentPage() {
               : "rounded-xl border border-gray-800 bg-[#121212]"
           }
           onDragOver={(event) => {
+            const dragIntent = getActiveSkillDrag()?.intent ?? null;
+            if (dragIntent !== "unassign") {
+              event.dataTransfer.dropEffect = "none";
+              setIsDroppingOnCatalog(false);
+              return;
+            }
+
             event.preventDefault();
+            event.dataTransfer.dropEffect = "move";
             setIsDroppingOnCatalog(true);
           }}
           onDragLeave={() => setIsDroppingOnCatalog(false)}

@@ -59,6 +59,7 @@ export function ManagerProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const refreshSkillsOnly = useCallback(async (refreshRemote = false) => {
+    setError(null);
     try {
       const nextSkills = await fetchSkills(refreshRemote);
       setSkills(nextSkills);

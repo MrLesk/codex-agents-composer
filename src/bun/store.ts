@@ -63,11 +63,6 @@ interface SkillsListResult {
   }>;
 }
 
-interface AgentSectionEntry {
-  description?: string;
-  config_file?: string;
-}
-
 interface AgentConfigFile {
   model?: string;
   model_reasoning_effort?: ReasoningEffort;
@@ -197,6 +192,34 @@ export class ManagerStore {
     await this.writeAgentConfigValue(`agents.${agentName}.description`, input.description || "");
     await this.writeAgentConfigValue(`agents.${agentName}.config_file`, configPath);
 
+    const skillKeys = Array.isArray(input.skillKeys)
+      ? Array.from(
+          new Set(
+            input.skillKeys.filter(
+              (skillKey): skillKey is string =>
+                typeof skillKey === "string" && skillKey.length > 0,
+            ),
+          ),
+        )
+      : [];
+
+    try {
+      for (const skillKey of skillKeys) {
+        await this.assignSkill(agentName, skillKey);
+      }
+    } catch (error) {
+      try {
+        await this.deleteAgent(agentName);
+      } catch (rollbackError) {
+        const message = error instanceof Error ? error.message : String(error);
+        const rollbackMessage =
+          rollbackError instanceof Error ? rollbackError.message : String(rollbackError);
+        throw new Error(`${message}. Rollback failed: ${rollbackMessage}`);
+      }
+
+      throw error;
+    }
+
     const created = await this.getAgent(agentName);
     if (!created) {
       throw new Error("Failed to create agent");
@@ -299,31 +322,18 @@ export class ManagerStore {
 
   async deleteAgent(agentId: string): Promise<void> {
     const current = await this.getAgent(agentId);
-    let fallbackConfigFile: string | null = null;
-
     if (!current) {
-      const configRead = await this.readCodexConfig();
-      const agentsSection = configRead.config.agents || {};
-      const rawEntry = agentsSection[agentId];
-
-      if (!rawEntry || typeof rawEntry !== "object" || Array.isArray(rawEntry)) {
-        throw new Error(`Agent '${agentId}' not found in Codex config`);
-      }
-
-      fallbackConfigFile = (rawEntry as AgentSectionEntry).config_file || null;
+      throw new Error(`Agent '${agentId}' not found in Codex config`);
     }
 
     await this.writeAgentConfigValue(`agents.${agentId}`, null, "replace");
 
     this.db.query("DELETE FROM agent_skills WHERE agent_id = ?1").run(agentId);
 
-    const configFile = current?.configFile || fallbackConfigFile;
-    if (configFile) {
-      try {
-        await unlink(configFile);
-      } catch {
-        // Ignore cleanup errors for deleted agent config files.
-      }
+    try {
+      await unlink(current.configFile);
+    } catch {
+      // Ignore cleanup errors for deleted agent config files.
     }
   }
 
@@ -665,6 +675,9 @@ export class ManagerStore {
     }
 
     const nextContent = input.content || "";
+    if (!nextContent.trim()) {
+      throw new Error("Skill instructions are required");
+    }
     const current = this.parseSkillMarkdown(document.markdown, nextName);
 
     const markdown = this.serializeSkillMarkdown({
@@ -730,6 +743,9 @@ export class ManagerStore {
     }
 
     const content = input.content || "";
+    if (!content.trim()) {
+      throw new Error("Skill instructions are required");
+    }
 
     const markdown = this.serializeSkillMarkdown({
       frontmatter: {},
@@ -781,7 +797,10 @@ export class ManagerStore {
 
     const agents = await Promise.all(
       entries.map(async ([agentKey, raw]) => {
-        const parsedEntry = raw as AgentSectionEntry;
+        const parsedEntry = raw as {
+          description?: string;
+          config_file?: string;
+        };
         if (!parsedEntry.config_file) {
           return null;
         }

@@ -1,6 +1,7 @@
 import { Cloud, HardDrive, Download, Package } from "lucide-react";
 import { clsx } from "clsx";
 import type { Skill } from "../types";
+import { clearActiveSkillDrag, setActiveSkillDrag } from "../skillDragState";
 
 const SKILL_MIME_TYPE = "application/x-codex-skill";
 
@@ -28,11 +29,20 @@ export function SkillCard({
   dragIntent = "assign",
 }: SkillCardProps) {
   const onDragStart = (event: React.DragEvent<HTMLElement>) => {
+    setActiveSkillDrag({
+      skillKey: skill.key,
+      skillName: skill.name,
+      intent: dragIntent,
+    });
     event.dataTransfer.effectAllowed = dragIntent === "unassign" ? "move" : "copy";
     event.dataTransfer.setData(
       SKILL_MIME_TYPE,
-      JSON.stringify({ skillKey: skill.key, intent: dragIntent }),
+      JSON.stringify({ skillKey: skill.key, skillName: skill.name, intent: dragIntent }),
     );
+  };
+
+  const onDragEnd = () => {
+    clearActiveSkillDrag();
   };
 
   const open = () => {
@@ -47,10 +57,11 @@ export function SkillCard({
         "rounded-xl border border-gray-800 bg-[#171717] transition-colors",
         compact ? "px-3 py-2" : "p-4",
         disabled ? "opacity-70" : "hover:border-gray-700",
-        onOpen && "cursor-pointer",
+        disabled ? "cursor-not-allowed" : "cursor-grab active:cursor-grabbing",
       )}
       draggable
       onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
       onClick={open}
     >
       <div className="flex items-start justify-between gap-2">

@@ -52,6 +52,7 @@ export interface CreateAgentInput {
   model: string;
   reasoningEffort: ReasoningEffort;
   instructions: string;
+  skillKeys?: string[];
 }
 
 export interface UpdateAgentInput {

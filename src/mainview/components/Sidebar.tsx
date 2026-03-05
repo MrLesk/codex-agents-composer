@@ -1,13 +1,23 @@
-import { ChevronDown, ChevronRight, Loader2, Pencil, Plus } from "lucide-react";
+import { ChevronDown, ChevronRight, Loader2, Pencil, Plus, Unplug } from "lucide-react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { clsx } from "clsx";
 import { fetchAgentDetail } from "../api";
 import { useManager } from "../context/ManagerContext";
+import { clearActiveSkillDrag, getActiveSkillDrag, setActiveSkillDrag } from "../skillDragState";
 import type { Skill } from "../types";
 import appLogo from "../assets/app-logo.png";
 
 const SKILL_MIME_TYPE = "application/x-codex-skill";
+
+interface PendingDroppedSkill {
+  skillName: string;
+}
+
+interface DraggedSidebarSkill {
+  agentId: string;
+  skillName: string;
+}
 
 function formatModelLabel(model: string): string {
   return model
@@ -32,36 +42,31 @@ function formatReasoningLabel(reasoningEffort: string): string {
 export function Sidebar() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { agents, assignSkillToAgent, assigningAgentId } = useManager();
+  const { agents, assignSkillToAgent, unassignSkillFromAgent, assigningAgentId } = useManager();
   const [activeDropAgentId, setActiveDropAgentId] = useState<string | null>(null);
   const [expandedAgentId, setExpandedAgentId] = useState<string | null>(null);
   const [skillsByAgentId, setSkillsByAgentId] = useState<Record<string, Skill[]>>({});
   const [loadingSkillsAgentId, setLoadingSkillsAgentId] = useState<string | null>(null);
+  const [pendingDroppedSkills, setPendingDroppedSkills] = useState<
+    Record<string, PendingDroppedSkill | undefined>
+  >({});
+  const [draggedSidebarSkill, setDraggedSidebarSkill] = useState<DraggedSidebarSkill | null>(null);
+  const [isDroppingOnUnassignZone, setIsDroppingOnUnassignZone] = useState(false);
+  const skillsByAgentIdRef = useRef(skillsByAgentId);
 
   const showSidebarDropHint = location.pathname === "/";
 
-  // Invalidate cached skills when agents change (e.g. skills assigned/unassigned from AgentPage)
-  const prevAgentsRef = useRef(agents);
   useEffect(() => {
-    const prev = prevAgentsRef.current;
-    prevAgentsRef.current = agents;
-
-    if (prev === agents) return;
-
-    const changed = agents.some((agent) => {
-      const old = prev.find((a) => a.id === agent.id);
-      return old && old.skillCount !== agent.skillCount;
-    });
-
-    if (changed) {
-      setSkillsByAgentId({});
-    }
-  }, [agents]);
+    skillsByAgentIdRef.current = skillsByAgentId;
+  }, [skillsByAgentId]);
 
   const loadAgentSkills = useCallback(
-    async (agentId: string) => {
-      // Only show loading spinner when there's no cached data to display
-      if (!skillsByAgentId[agentId]) {
+    async (
+      agentId: string,
+      options: { showLoadingIfMissing?: boolean } = {},
+    ) => {
+      const { showLoadingIfMissing = true } = options;
+      if (showLoadingIfMissing && !skillsByAgentIdRef.current[agentId]) {
         setLoadingSkillsAgentId(agentId);
       }
 
@@ -79,8 +84,45 @@ export function Sidebar() {
         );
       }
     },
-    [skillsByAgentId],
+    [],
   );
+
+  // Keep expanded agent content stable while refreshing changed skill counts.
+  const prevAgentsRef = useRef(agents);
+  useEffect(() => {
+    const prev = prevAgentsRef.current;
+    prevAgentsRef.current = agents;
+
+    if (prev === agents) return;
+
+    const changedAgentIds = agents.flatMap((agent) => {
+      const old = prev.find((a) => a.id === agent.id);
+      return old && old.skillCount !== agent.skillCount ? [agent.id] : [];
+    });
+
+    if (changedAgentIds.length === 0) return;
+
+    setSkillsByAgentId((current) => {
+      let next = current;
+
+      for (const agentId of changedAgentIds) {
+        if (agentId === expandedAgentId) continue;
+        if (!(agentId in next)) continue;
+
+        if (next === current) {
+          next = { ...current };
+        }
+
+        delete next[agentId];
+      }
+
+      return next;
+    });
+
+    if (expandedAgentId && changedAgentIds.includes(expandedAgentId)) {
+      void loadAgentSkills(expandedAgentId, { showLoadingIfMissing: false });
+    }
+  }, [agents, expandedAgentId, loadAgentSkills]);
 
   const onDrop = async (agentId: string, event: React.DragEvent<HTMLDivElement>) => {
     event.preventDefault();
@@ -89,8 +131,21 @@ export function Sidebar() {
     if (!raw) return;
 
     try {
-      const data = JSON.parse(raw) as { skillKey?: string };
+      const data = JSON.parse(raw) as {
+        skillKey?: string;
+        skillName?: string;
+        intent?: "assign" | "unassign";
+      };
       if (!data.skillKey) return;
+      if (data.intent === "unassign") return;
+
+      setPendingDroppedSkills((current) => ({
+        ...current,
+        [agentId]: {
+          skillName: data.skillName || "Assigning skill...",
+        },
+      }));
+
       const assignedSkills = await assignSkillToAgent(agentId, data.skillKey);
       setSkillsByAgentId((prev) => ({
         ...prev,
@@ -98,6 +153,75 @@ export function Sidebar() {
       }));
     } catch (error) {
       console.error("Failed to assign skill via drag/drop", error);
+    } finally {
+      setPendingDroppedSkills((current) => {
+        const next = { ...current };
+        delete next[agentId];
+        return next;
+      });
+    }
+  };
+
+  const onSidebarSkillDragStart = (
+    agentId: string,
+    skill: Skill,
+    event: React.DragEvent<HTMLDivElement>,
+  ) => {
+    setActiveSkillDrag({
+      agentId,
+      skillKey: skill.key,
+      skillName: skill.name,
+      intent: "unassign",
+    });
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData(
+      SKILL_MIME_TYPE,
+      JSON.stringify({
+        agentId,
+        skillKey: skill.key,
+        skillName: skill.name,
+        intent: "unassign",
+      }),
+    );
+    setDraggedSidebarSkill({
+      agentId,
+      skillName: skill.name,
+    });
+  };
+
+  const onSidebarSkillDragEnd = () => {
+    clearActiveSkillDrag();
+    setDraggedSidebarSkill(null);
+    setIsDroppingOnUnassignZone(false);
+  };
+
+  const unassignFromSidebarDrop = async (event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    setIsDroppingOnUnassignZone(false);
+    const raw = event.dataTransfer.getData(SKILL_MIME_TYPE);
+    if (!raw) return;
+
+    try {
+      const data = JSON.parse(raw) as {
+        agentId?: string;
+        skillKey?: string;
+        intent?: "assign" | "unassign";
+      };
+
+      if (!data.skillKey || !data.agentId || data.intent !== "unassign") {
+        return;
+      }
+
+      const nextAssignedSkills = await unassignSkillFromAgent(data.agentId, data.skillKey);
+      setSkillsByAgentId((current) => ({
+        ...current,
+        [data.agentId!]: nextAssignedSkills,
+      }));
+    } catch (error) {
+      console.error("Failed to unassign skill via sidebar drag/drop", error);
+    } finally {
+      clearActiveSkillDrag();
+      setDraggedSidebarSkill(null);
     }
   };
 
@@ -158,6 +282,8 @@ export function Sidebar() {
           const isExpanded = expandedAgentId === agent.id;
           const isLoadingSkills = loadingSkillsAgentId === agent.id;
           const assignedSkills = skillsByAgentId[agent.id] || [];
+          const orderedAssignedSkills = [...assignedSkills].reverse();
+          const pendingDroppedSkill = pendingDroppedSkills[agent.id];
           const agentPath = `/agent/${encodeURIComponent(agent.id)}`;
           const isActive = location.pathname === agentPath;
 
@@ -165,7 +291,17 @@ export function Sidebar() {
             <div
               key={agent.id}
               onDragOver={(event) => {
+                const dragIntent = getActiveSkillDrag()?.intent ?? null;
+                if (dragIntent !== "assign") {
+                  event.dataTransfer.dropEffect = "none";
+                  setActiveDropAgentId((current) =>
+                    current === agent.id ? null : current,
+                  );
+                  return;
+                }
+
                 event.preventDefault();
+                event.dataTransfer.dropEffect = "copy";
                 setActiveDropAgentId(agent.id);
               }}
               onDragLeave={() => {
@@ -221,18 +357,21 @@ export function Sidebar() {
 
               {isExpanded ? (
                 <div className="mt-1 rounded-lg border border-gray-800/80 bg-black/20 p-2 space-y-1.5">
-                  {isLoadingSkills ? (
+                  {orderedAssignedSkills.length === 0 && isLoadingSkills ? (
                     <div className="text-[11px] text-gray-500 inline-flex items-center gap-1.5 px-1 py-1">
                       <Loader2 className="w-3 h-3 animate-spin" />
                       Loading skills...
                     </div>
-                  ) : assignedSkills.length === 0 ? (
+                  ) : orderedAssignedSkills.length === 0 && !pendingDroppedSkill ? (
                     <p className="text-[11px] text-gray-600 px-1 py-1">No skills assigned.</p>
                   ) : (
-                    assignedSkills.map((skill) => (
+                    orderedAssignedSkills.map((skill) => (
                       <div
                         key={`${agent.id}:${skill.key}`}
-                        className="rounded-md border border-gray-800 bg-[#121212] px-2 py-1.5 flex items-center gap-2 justify-between"
+                        draggable
+                        onDragStart={(event) => onSidebarSkillDragStart(agent.id, skill, event)}
+                        onDragEnd={onSidebarSkillDragEnd}
+                        className="rounded-md border border-gray-800 bg-[#121212] px-2 py-1.5 flex items-center gap-2 justify-between cursor-grab active:cursor-grabbing"
                       >
                         <button
                           type="button"
@@ -254,6 +393,18 @@ export function Sidebar() {
                     ))
                   )}
 
+                  {pendingDroppedSkill ? (
+                    <div className="rounded-md border border-blue-500/30 bg-blue-500/5 px-2 py-1.5 flex items-center gap-2 justify-between">
+                      <div className="min-w-0">
+                        <p className="text-[11px] text-gray-200 truncate">
+                          {pendingDroppedSkill.skillName}
+                        </p>
+                        <p className="text-[10px] text-gray-500">Assigning...</p>
+                      </div>
+                      <Loader2 className="w-3 h-3 text-blue-300 animate-spin shrink-0" />
+                    </div>
+                  ) : null}
+
                   <button
                     type="button"
                     onClick={() => navigate("/skill/new")}
@@ -268,6 +419,48 @@ export function Sidebar() {
           );
         })}
       </nav>
+
+      {draggedSidebarSkill ? (
+        <div className="px-3 pb-4">
+          <div
+            onDragOver={(event) => {
+              const dragIntent = getActiveSkillDrag()?.intent ?? null;
+              if (dragIntent !== "unassign") {
+                event.dataTransfer.dropEffect = "none";
+                setIsDroppingOnUnassignZone(false);
+                return;
+              }
+
+              event.preventDefault();
+              event.dataTransfer.dropEffect = "move";
+              setIsDroppingOnUnassignZone(true);
+            }}
+            onDragLeave={() => setIsDroppingOnUnassignZone(false)}
+            onDrop={(event) => void unassignFromSidebarDrop(event)}
+            className={clsx(
+              "rounded-xl border border-dashed px-3 py-3 transition-colors",
+              isDroppingOnUnassignZone
+                ? "border-rose-400/70 bg-rose-500/10"
+                : "border-rose-500/30 bg-rose-500/5",
+            )}
+          >
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-xs text-rose-200 inline-flex items-center gap-1.5">
+                  <Unplug className="w-3.5 h-3.5" />
+                  Drop Here To Unassign
+                </p>
+                <p className="mt-1 text-[11px] text-rose-200/70 truncate">
+                  {draggedSidebarSkill.skillName}
+                </p>
+              </div>
+              {assigningAgentId === draggedSidebarSkill.agentId ? (
+                <Loader2 className="w-3.5 h-3.5 text-rose-200 animate-spin shrink-0" />
+              ) : null}
+            </div>
+          </div>
+        </div>
+      ) : null}
     </aside>
   );
 }

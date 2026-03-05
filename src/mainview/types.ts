@@ -16,7 +16,6 @@ export interface Skill {
 
 export interface SkillDocument {
   skill: Skill;
-  markdown: string;
   name: string;
   description: string;
   content: string;
@@ -60,6 +59,7 @@ export interface CreateAgentInput {
   model: string;
   reasoningEffort: ReasoningEffort;
   instructions: string;
+  skillKeys?: string[];
 }
 
 export interface UpdateAgentInput {
