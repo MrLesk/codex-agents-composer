@@ -4,6 +4,7 @@ import { Layout } from "./pages/Layout";
 import { SkillsPage } from "./pages/SkillsPage";
 import { AgentPage } from "./pages/AgentPage";
 import { SkillEditorPage } from "./pages/SkillEditorPage";
+import { SettingsPage } from "./pages/SettingsPage";
 
 const router = createBrowserRouter([
   {
@@ -15,6 +16,7 @@ const router = createBrowserRouter([
       { path: "agent/:agentId", Component: AgentPage },
       { path: "skill/new", Component: SkillEditorPage },
       { path: "skill/:skillKey", Component: SkillEditorPage },
+      { path: "settings", Component: SettingsPage },
       { path: "*", Component: () => <Navigate to="/" replace /> },
     ],
   },

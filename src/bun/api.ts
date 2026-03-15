@@ -4,6 +4,7 @@ import type {
   CreateSkillInput,
   SaveSkillInput,
   UpdateAgentInput,
+  UpdateSettingsInput,
 } from "./types";
 
 const JSON_HEADERS = {
@@ -34,6 +35,48 @@ function parseSkillWriteInput(body: unknown): SaveSkillInput {
     description:
       typeof source.description === "string" ? source.description : "",
     content: typeof source.content === "string" ? source.content : "",
+  };
+}
+
+function parseOptionalPositiveInteger(
+  value: unknown,
+  fieldName: string,
+  maxValue?: number,
+): number | null {
+  if (value == null || value === "") {
+    return null;
+  }
+
+  const parsed =
+    typeof value === "number"
+      ? value
+      : typeof value === "string"
+        ? Number(value.trim())
+        : Number.NaN;
+
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    throw new Error(`${fieldName} must be a positive integer`);
+  }
+
+  if (typeof maxValue === "number" && parsed > maxValue) {
+    throw new Error(`${fieldName} must be between 1 and ${maxValue}`);
+  }
+
+  return parsed;
+}
+
+function parseSettingsInput(body: unknown): UpdateSettingsInput {
+  const source =
+    body && typeof body === "object" ? (body as Record<string, unknown>) : {};
+
+  return {
+    multiAgentEnabled: source.multiAgentEnabled === true,
+    maxThreads: parseOptionalPositiveInteger(source.maxThreads, "maxThreads", 12),
+    maxDepth: parseOptionalPositiveInteger(source.maxDepth, "maxDepth", 4),
+    jobMaxRuntimeSeconds: parseOptionalPositiveInteger(
+      source.jobMaxRuntimeSeconds,
+      "jobMaxRuntimeSeconds",
+    ),
   };
 }
 
@@ -77,6 +120,12 @@ export function startApiServer(store: ManagerStore, port: number) {
         if (request.method === "POST" && pathname === "/api/skills/refresh") {
           const skills = await store.refreshSkillsCatalog(true);
           return json({ skills });
+        }
+
+        if (request.method === "PUT" && pathname === "/api/settings") {
+          const input = parseSettingsInput((await request.json()) as UpdateSettingsInput);
+          const settings = await store.updateSettings(input);
+          return json({ settings });
         }
 
         const skillMatch = pathname.match(/^\/api\/skills\/(.+)$/);

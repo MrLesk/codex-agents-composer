@@ -1,4 +1,13 @@
-import { ChevronDown, ChevronRight, Loader2, Pencil, Plus, Unplug } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronRight,
+  Loader2,
+  Pencil,
+  Plus,
+  Settings2,
+  TriangleAlert,
+  Unplug,
+} from "lucide-react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { clsx } from "clsx";
@@ -42,7 +51,13 @@ function formatReasoningLabel(reasoningEffort: string): string {
 export function Sidebar() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { agents, assignSkillToAgent, unassignSkillFromAgent, assigningAgentId } = useManager();
+  const {
+    agents,
+    settings,
+    assignSkillToAgent,
+    unassignSkillFromAgent,
+    assigningAgentId,
+  } = useManager();
   const [activeDropAgentId, setActiveDropAgentId] = useState<string | null>(null);
   const [expandedAgentId, setExpandedAgentId] = useState<string | null>(null);
   const [skillsByAgentId, setSkillsByAgentId] = useState<Record<string, Skill[]>>({});
@@ -55,6 +70,7 @@ export function Sidebar() {
   const skillsByAgentIdRef = useRef(skillsByAgentId);
 
   const showSidebarDropHint = location.pathname === "/";
+  const isMultiAgentEnabled = settings?.multiAgentEnabled ?? true;
 
   useEffect(() => {
     skillsByAgentIdRef.current = skillsByAgentId;
@@ -266,13 +282,32 @@ export function Sidebar() {
       </div>
 
       <div className="px-4 py-3">
-        <NavLink
-          to="/agent/new"
-          className="flex items-center justify-center gap-2 px-4 py-3 rounded-xl border border-dashed border-gray-700 text-gray-300 hover:border-blue-500/50 hover:text-white transition-colors"
-        >
-          <Plus className="w-4 h-4" />
-          New Agent
-        </NavLink>
+        {isMultiAgentEnabled ? (
+          <NavLink
+            to="/agent/new"
+            className="flex items-center justify-center gap-2 px-4 py-3 rounded-xl border border-dashed border-gray-700 text-gray-300 hover:border-blue-500/50 hover:text-white transition-colors"
+          >
+            <Plus className="w-4 h-4" />
+            New Agent
+          </NavLink>
+        ) : (
+          <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3">
+            <p className="text-xs text-amber-200 inline-flex items-center gap-1.5">
+              <TriangleAlert className="h-3.5 w-3.5" />
+              Multi-agent mode is disabled
+            </p>
+            <p className="mt-1.5 text-[11px] leading-5 text-amber-100/80">
+              Turn on `features.multi_agent` in Settings to create new agents.
+            </p>
+            <NavLink
+              to="/settings"
+              className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-amber-400/30 bg-black/20 px-3 py-1.5 text-xs text-amber-100 hover:border-amber-300/50 hover:text-white transition-colors"
+            >
+              <Settings2 className="h-3.5 w-3.5" />
+              Open Settings
+            </NavLink>
+          </div>
+        )}
       </div>
 
       <nav className="flex-1 overflow-y-auto px-3 pb-4 space-y-2">
@@ -425,7 +460,7 @@ export function Sidebar() {
       </nav>
 
       {draggedSidebarSkill ? (
-        <div className="px-3 pb-4">
+        <div className="px-3 pb-3">
           <div
             onDragOver={(event) => {
               const dragIntent = getActiveSkillDrag()?.intent ?? null;
@@ -465,6 +500,23 @@ export function Sidebar() {
           </div>
         </div>
       ) : null}
+
+      <div className="border-t border-gray-800 px-3 py-3">
+        <NavLink
+          to="/settings"
+          className={({ isActive }) =>
+            clsx(
+              "flex items-center gap-2 rounded-xl border px-3 py-2.5 text-sm transition-colors",
+              isActive
+                ? "border-blue-500/40 bg-blue-500/10 text-blue-200"
+                : "border-gray-800 bg-[#121212] text-gray-300 hover:border-gray-700 hover:text-white",
+            )
+          }
+        >
+          <Settings2 className="h-4 w-4" />
+          Settings
+        </NavLink>
+      </div>
     </aside>
   );
 }

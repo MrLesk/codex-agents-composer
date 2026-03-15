@@ -4,10 +4,12 @@ import type {
   BootstrapPayload,
   CreateAgentInput,
   CreateSkillInput,
+  MultiAgentSettings,
   SaveSkillInput,
   Skill,
   SkillDocument,
   UpdateAgentInput,
+  UpdateSettingsInput,
 } from "./types";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "http://127.0.0.1:8765";
@@ -133,4 +135,12 @@ export async function createSkill(input: CreateSkillInput): Promise<SkillDocumen
     body: JSON.stringify(input),
   });
   return result.document;
+}
+
+export async function updateSettings(input: UpdateSettingsInput): Promise<MultiAgentSettings> {
+  const result = await request<{ settings: MultiAgentSettings }>("/api/settings", {
+    method: "PUT",
+    body: JSON.stringify(input),
+  });
+  return result.settings;
 }

@@ -14,13 +14,21 @@ import {
   fetchBootstrap,
   fetchSkills,
   unassignSkill,
+  updateSettings,
 } from "../api";
-import type { Agent, ModelOption, Skill } from "../types";
+import type {
+  Agent,
+  ModelOption,
+  MultiAgentSettings,
+  Skill,
+  UpdateSettingsInput,
+} from "../types";
 
 interface ManagerContextValue {
   agents: Agent[];
   skills: Skill[];
   models: ModelOption[];
+  settings: MultiAgentSettings | null;
   loading: boolean;
   error: string | null;
   assigningAgentId: string | null;
@@ -31,6 +39,7 @@ interface ManagerContextValue {
   deleteAgentById: (agentId: string) => Promise<void>;
   deleteSkillByKey: (skillKey: string) => Promise<void>;
   upsertAgent: (agent: Agent, previousId?: string) => void;
+  saveSettings: (input: UpdateSettingsInput) => Promise<MultiAgentSettings>;
 }
 
 const ManagerContext = createContext<ManagerContextValue | null>(null);
@@ -39,6 +48,7 @@ export function ManagerProvider({ children }: { children: ReactNode }) {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [skills, setSkills] = useState<Skill[]>([]);
   const [models, setModels] = useState<ModelOption[]>([]);
+  const [settings, setSettings] = useState<MultiAgentSettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [assigningAgentId, setAssigningAgentId] = useState<string | null>(null);
@@ -48,6 +58,7 @@ export function ManagerProvider({ children }: { children: ReactNode }) {
     setAgents(payload.agents);
     setSkills(payload.skills);
     setModels(payload.models);
+    setSettings(payload.settings);
   }, []);
 
   const refreshAll = useCallback(async (refreshRemote = false) => {
@@ -165,6 +176,19 @@ export function ManagerProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const saveSettingsConfig = useCallback(async (input: UpdateSettingsInput) => {
+    setError(null);
+    try {
+      const nextSettings = await updateSettings(input);
+      setSettings(nextSettings);
+      return nextSettings;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setError(message);
+      throw err;
+    }
+  }, []);
+
   useEffect(() => {
     void refreshAll(true);
   }, [refreshAll]);
@@ -174,6 +198,7 @@ export function ManagerProvider({ children }: { children: ReactNode }) {
       agents,
       skills,
       models,
+      settings,
       loading,
       error,
       assigningAgentId,
@@ -184,11 +209,13 @@ export function ManagerProvider({ children }: { children: ReactNode }) {
       deleteAgentById,
       deleteSkillByKey,
       upsertAgent,
+      saveSettings: saveSettingsConfig,
     }),
     [
       agents,
       skills,
       models,
+      settings,
       loading,
       error,
       assigningAgentId,
@@ -199,6 +226,7 @@ export function ManagerProvider({ children }: { children: ReactNode }) {
       deleteAgentById,
       deleteSkillByKey,
       upsertAgent,
+      saveSettingsConfig,
     ],
   );
 

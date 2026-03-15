@@ -12,11 +12,13 @@ import type {
   BootstrapPayload,
   CreateAgentInput,
   CreateSkillInput,
-  SaveSkillInput,
   ModelRecord,
+  MultiAgentSettings,
   ReasoningEffort,
+  SaveSkillInput,
   SkillDocument,
   SkillRecord,
+  UpdateSettingsInput,
   UpdateAgentInput,
 } from "./types";
 
@@ -24,7 +26,14 @@ interface ConfigReadResult {
   config: {
     model?: string;
     model_reasoning_effort?: ReasoningEffort;
-    agents?: Record<string, unknown>;
+    features?: {
+      multi_agent?: boolean;
+    };
+    agents?: Record<string, unknown> & {
+      max_threads?: unknown;
+      max_depth?: unknown;
+      job_max_runtime_seconds?: unknown;
+    };
   };
 }
 
@@ -77,7 +86,11 @@ interface SkillMarkdownParts {
   markdown: string;
 }
 
-const RESERVED_AGENT_KEYS = new Set(["max_threads", "max_depth"]);
+const RESERVED_AGENT_KEYS = new Set([
+  "max_threads",
+  "max_depth",
+  "job_max_runtime_seconds",
+]);
 const REMOTE_REFRESH_INTERVAL_MS = 30 * 60 * 1000;
 const DEFAULT_MODEL = "gpt-5.3-codex";
 const DEFAULT_REASONING: ReasoningEffort = "medium";
@@ -141,13 +154,20 @@ export class ManagerStore {
       // Remote refresh is best-effort; don't block bootstrap.
     }
 
+    const configRead = await this.readCodexConfig();
+
     const [agents, skills, models] = await Promise.all([
-      this.getAgents(),
+      this.getAgents(configRead),
       this.getSkills(),
       this.getModels(),
     ]);
 
-    return { agents, skills, models };
+    return {
+      agents,
+      skills,
+      models,
+      settings: this.getMultiAgentSettings(configRead),
+    };
   }
 
   async getAgentDetail(agentId: string): Promise<AgentDetailPayload> {
@@ -765,18 +785,46 @@ export class ManagerStore {
     return this.getSkillDocument(skillKey);
   }
 
+  async updateSettings(input: UpdateSettingsInput): Promise<MultiAgentSettings> {
+    await this.writeAgentConfigValues([
+      {
+        keyPath: "features.multi_agent",
+        value: input.multiAgentEnabled,
+        mergeStrategy: "upsert",
+      },
+      {
+        keyPath: "agents.max_threads",
+        value: input.maxThreads,
+        mergeStrategy: "upsert",
+      },
+      {
+        keyPath: "agents.max_depth",
+        value: input.maxDepth,
+        mergeStrategy: "upsert",
+      },
+      {
+        keyPath: "agents.job_max_runtime_seconds",
+        value: input.jobMaxRuntimeSeconds,
+        mergeStrategy: "upsert",
+      },
+    ]);
+
+    const configRead = await this.readCodexConfig();
+    return this.getMultiAgentSettings(configRead);
+  }
+
   private async getAgent(agentId: string): Promise<AgentRecord | null> {
     const agents = await this.getAgents();
     return agents.find((agent) => agent.id === agentId) ?? null;
   }
 
-  private async getAgents(): Promise<AgentRecord[]> {
-    const configRead = await this.readCodexConfig();
-    const globalModel = configRead.config.model || DEFAULT_MODEL;
+  private async getAgents(configRead?: ConfigReadResult): Promise<AgentRecord[]> {
+    const resolvedConfig = configRead || (await this.readCodexConfig());
+    const globalModel = resolvedConfig.config.model || DEFAULT_MODEL;
     const globalReasoning =
-      configRead.config.model_reasoning_effort || DEFAULT_REASONING;
+      resolvedConfig.config.model_reasoning_effort || DEFAULT_REASONING;
 
-    const agentsSection = configRead.config.agents || {};
+    const agentsSection = resolvedConfig.config.agents || {};
     const entries = Object.entries(agentsSection).filter(([key, value]) => {
       if (RESERVED_AGENT_KEYS.has(key)) return false;
       return Boolean(value && typeof value === "object");
@@ -829,6 +877,20 @@ export class ManagerStore {
     return agents
       .filter((agent): agent is AgentRecord => Boolean(agent))
       .sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  private getMultiAgentSettings(configRead: ConfigReadResult): MultiAgentSettings {
+    const features = configRead.config.features || {};
+    const agentsSection = configRead.config.agents || {};
+
+    return {
+      multiAgentEnabled: features.multi_agent === true,
+      maxThreads: this.parseOptionalPositiveInteger(agentsSection.max_threads),
+      maxDepth: this.parseOptionalPositiveInteger(agentsSection.max_depth),
+      jobMaxRuntimeSeconds: this.parseOptionalPositiveInteger(
+        agentsSection.job_max_runtime_seconds,
+      ),
+    };
   }
 
   private async getModels(): Promise<ModelRecord[]> {
@@ -991,6 +1053,21 @@ export class ManagerStore {
       includeLayers: false,
       cwd: this.cwd,
     });
+  }
+
+  private parseOptionalPositiveInteger(value: unknown): number | null {
+    if (typeof value === "number" && Number.isInteger(value) && value > 0) {
+      return value;
+    }
+
+    if (typeof value === "string") {
+      const parsed = Number(value.trim());
+      if (Number.isInteger(parsed) && parsed > 0) {
+        return parsed;
+      }
+    }
+
+    return null;
   }
 
   private async writeAgentConfigValue(

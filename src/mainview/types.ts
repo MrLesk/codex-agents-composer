@@ -40,10 +40,18 @@ export interface ModelOption {
   supportedReasoningEfforts: ReasoningEffort[];
 }
 
+export interface MultiAgentSettings {
+  multiAgentEnabled: boolean;
+  maxThreads: number | null;
+  maxDepth: number | null;
+  jobMaxRuntimeSeconds: number | null;
+}
+
 export interface BootstrapPayload {
   agents: Agent[];
   skills: Skill[];
   models: ModelOption[];
+  settings: MultiAgentSettings;
 }
 
 export interface AgentDetailPayload {
@@ -80,4 +88,11 @@ export interface SaveSkillInput {
   name: string;
   description: string;
   content: string;
+}
+
+export interface UpdateSettingsInput {
+  multiAgentEnabled: boolean;
+  maxThreads: number | null;
+  maxDepth: number | null;
+  jobMaxRuntimeSeconds: number | null;
 }
