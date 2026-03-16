@@ -5,6 +5,7 @@ export default {
     name: "Codex Agents Composer",
     identifier: "dev.codex.agents-composer",
     version: "0.1.0",
+    description: "Desktop app for composing Codex agents and skills",
   },
   build: {
     copy: {
@@ -18,9 +19,11 @@ export default {
     },
     linux: {
       bundleCEF: false,
+      icon: "assets/AppIcon.png",
     },
     win: {
       bundleCEF: false,
+      icon: "assets/AppIcon.ico",
     },
   },
 } satisfies ElectrobunConfig;

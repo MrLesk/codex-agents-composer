@@ -55,6 +55,18 @@ To produce a distributable application bundle:
 bun run build:app
 ```
 
+For a release-channel package build:
+
+```bash
+bun run build:release
+```
+
+Current ElectroBun packaging outputs for this project are:
+
+- macOS: `.dmg`
+- Windows: installer `.exe` bundled in a `.zip`
+- Linux: installer `.tar.gz`
+
 ## License
 
 MIT
