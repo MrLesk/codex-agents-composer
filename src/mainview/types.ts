@@ -41,7 +41,6 @@ export interface ModelOption {
 }
 
 export interface MultiAgentSettings {
-  multiAgentEnabled: boolean;
   maxThreads: number | null;
   maxDepth: number | null;
   jobMaxRuntimeSeconds: number | null;
@@ -91,7 +90,6 @@ export interface SaveSkillInput {
 }
 
 export interface UpdateSettingsInput {
-  multiAgentEnabled: boolean;
   maxThreads: number | null;
   maxDepth: number | null;
   jobMaxRuntimeSeconds: number | null;

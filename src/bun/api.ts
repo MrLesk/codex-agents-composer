@@ -70,7 +70,6 @@ function parseSettingsInput(body: unknown): UpdateSettingsInput {
     body && typeof body === "object" ? (body as Record<string, unknown>) : {};
 
   return {
-    multiAgentEnabled: source.multiAgentEnabled === true,
     maxThreads: parseOptionalPositiveInteger(source.maxThreads, "maxThreads", 12),
     maxDepth: parseOptionalPositiveInteger(source.maxDepth, "maxDepth", 4),
     jobMaxRuntimeSeconds: parseOptionalPositiveInteger(

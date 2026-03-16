@@ -5,7 +5,6 @@ import {
   Pencil,
   Plus,
   Settings2,
-  TriangleAlert,
   Unplug,
 } from "lucide-react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router";
@@ -53,7 +52,6 @@ export function Sidebar() {
   const location = useLocation();
   const {
     agents,
-    settings,
     assignSkillToAgent,
     unassignSkillFromAgent,
     assigningAgentId,
@@ -70,7 +68,6 @@ export function Sidebar() {
   const skillsByAgentIdRef = useRef(skillsByAgentId);
 
   const showSidebarDropHint = location.pathname === "/";
-  const isMultiAgentEnabled = settings?.multiAgentEnabled ?? true;
 
   useEffect(() => {
     skillsByAgentIdRef.current = skillsByAgentId;
@@ -282,32 +279,13 @@ export function Sidebar() {
       </div>
 
       <div className="px-4 py-3">
-        {isMultiAgentEnabled ? (
-          <NavLink
-            to="/agent/new"
-            className="flex items-center justify-center gap-2 px-4 py-3 rounded-xl border border-dashed border-gray-700 text-gray-300 hover:border-blue-500/50 hover:text-white transition-colors"
-          >
-            <Plus className="w-4 h-4" />
-            New Agent
-          </NavLink>
-        ) : (
-          <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3">
-            <p className="text-xs text-amber-200 inline-flex items-center gap-1.5">
-              <TriangleAlert className="h-3.5 w-3.5" />
-              Multi-agent mode is disabled
-            </p>
-            <p className="mt-1.5 text-[11px] leading-5 text-amber-100/80">
-              Turn on `features.multi_agent` in Settings to create new agents.
-            </p>
-            <NavLink
-              to="/settings"
-              className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-amber-400/30 bg-black/20 px-3 py-1.5 text-xs text-amber-100 hover:border-amber-300/50 hover:text-white transition-colors"
-            >
-              <Settings2 className="h-3.5 w-3.5" />
-              Open Settings
-            </NavLink>
-          </div>
-        )}
+        <NavLink
+          to="/agent/new"
+          className="flex items-center justify-center gap-2 px-4 py-3 rounded-xl border border-dashed border-gray-700 text-gray-300 hover:border-blue-500/50 hover:text-white transition-colors"
+        >
+          <Plus className="w-4 h-4" />
+          New Agent
+        </NavLink>
       </div>
 
       <nav className="flex-1 overflow-y-auto px-3 pb-4 space-y-2">

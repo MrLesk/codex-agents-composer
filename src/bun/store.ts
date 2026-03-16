@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite";
-import { mkdir, access, writeFile, readFile, unlink } from "node:fs/promises";
+import { mkdir, access, writeFile, readFile, readdir, unlink } from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
 import { mkdirSync } from "node:fs";
 import os from "node:os";
@@ -26,9 +26,6 @@ interface ConfigReadResult {
   config: {
     model?: string;
     model_reasoning_effort?: ReasoningEffort;
-    features?: {
-      multi_agent?: boolean;
-    };
     agents?: Record<string, unknown> & {
       max_threads?: unknown;
       max_depth?: unknown;
@@ -73,9 +70,29 @@ interface SkillsListResult {
 }
 
 interface AgentConfigFile {
+  name?: string;
+  description?: string;
   model?: string;
   model_reasoning_effort?: ReasoningEffort;
   developer_instructions?: string;
+  skills?: {
+    config?: Array<{
+      path?: string;
+      enabled?: boolean;
+      [key: string]: unknown;
+    }>;
+    [key: string]: unknown;
+  };
+  [key: string]: unknown;
+}
+
+interface ResolvedAgentConfig {
+  name: string;
+  description: string;
+  model: string;
+  reasoningEffort: ReasoningEffort;
+  instructions: string;
+  skillPaths: string[];
 }
 
 interface SkillMarkdownParts {
@@ -86,11 +103,6 @@ interface SkillMarkdownParts {
   markdown: string;
 }
 
-const RESERVED_AGENT_KEYS = new Set([
-  "max_threads",
-  "max_depth",
-  "job_max_runtime_seconds",
-]);
 const REMOTE_REFRESH_INTERVAL_MS = 30 * 60 * 1000;
 const DEFAULT_MODEL = "gpt-5.3-codex";
 const DEFAULT_REASONING: ReasoningEffort = "medium";
@@ -104,7 +116,7 @@ export class ManagerStore {
   constructor(cwd: string) {
     this.cwd = cwd;
     this.codexHome = process.env.CODEX_HOME || path.join(os.homedir(), ".codex");
-    this.agentConfigDir = path.join(this.codexHome, "agents-composer", "agents");
+    this.agentConfigDir = path.join(this.codexHome, "agents");
 
     const dbPath = path.join(this.codexHome, "agents-composer", "composer.db");
     mkdirSync(path.dirname(dbPath), { recursive: true });
@@ -179,7 +191,7 @@ export class ManagerStore {
     ]);
 
     if (!agent) {
-      throw new Error(`Agent '${agentId}' not found in Codex config`);
+      throw new Error(`Agent '${agentId}' not found`);
     }
 
     return {
@@ -192,6 +204,11 @@ export class ManagerStore {
 
   async createAgent(input: CreateAgentInput): Promise<AgentRecord> {
     const agentName = this.sanitizeAgentName(input.name);
+    const description = this.requireAgentField(input.description, "Agent description");
+    const instructions = this.requireAgentField(
+      input.instructions,
+      "Agent developer instructions",
+    );
 
     if (!agentName) {
       throw new Error("Agent name is required");
@@ -204,13 +221,12 @@ export class ManagerStore {
 
     const configPath = path.join(this.agentConfigDir, `${agentName}.toml`);
     await this.writeAgentConfigFile(configPath, {
+      name: agentName,
+      description,
       model: input.model || DEFAULT_MODEL,
       model_reasoning_effort: input.reasoningEffort || DEFAULT_REASONING,
-      developer_instructions: input.instructions || "",
+      developer_instructions: instructions,
     });
-
-    await this.writeAgentConfigValue(`agents.${agentName}.description`, input.description || "");
-    await this.writeAgentConfigValue(`agents.${agentName}.config_file`, configPath);
 
     const skillKeys = Array.isArray(input.skillKeys)
       ? Array.from(
@@ -251,10 +267,15 @@ export class ManagerStore {
   async updateAgent(agentId: string, input: UpdateAgentInput): Promise<AgentRecord> {
     const current = await this.getAgent(agentId);
     if (!current) {
-      throw new Error(`Agent '${agentId}' not found in Codex config`);
+      throw new Error(`Agent '${agentId}' not found`);
     }
 
     const nextAgentId = this.sanitizeAgentName(input.name || agentId);
+    const description = this.requireAgentField(input.description, "Agent description");
+    const instructions = this.requireAgentField(
+      input.instructions,
+      "Agent developer instructions",
+    );
     if (!nextAgentId) {
       throw new Error("Agent name is required");
     }
@@ -270,33 +291,24 @@ export class ManagerStore {
       nextAgentId === agentId
         ? current.configFile
         : path.join(this.agentConfigDir, `${nextAgentId}.toml`);
+    const currentSkillPaths =
+      nextAgentId === agentId
+        ? []
+        : await this.readAssignedSkillPathsFromConfig(current.configFile);
 
     await this.writeAgentConfigFile(nextConfigPath, {
+      name: nextAgentId,
+      description,
       model: input.model || DEFAULT_MODEL,
       model_reasoning_effort: input.reasoningEffort || DEFAULT_REASONING,
-      developer_instructions: input.instructions || "",
+      developer_instructions: instructions,
     });
 
-    if (nextAgentId === agentId) {
-      await this.writeAgentConfigValue(`agents.${agentId}.description`, input.description || "");
-      await this.writeAgentConfigValue(`agents.${agentId}.config_file`, nextConfigPath);
-    } else {
-      await this.writeAgentConfigValues([
-        {
-          keyPath: `agents.${nextAgentId}`,
-          value: {
-            description: input.description || "",
-            config_file: nextConfigPath,
-          },
-          mergeStrategy: "upsert",
-        },
-        {
-          keyPath: `agents.${agentId}`,
-          value: null,
-          mergeStrategy: "replace",
-        },
-      ]);
+    if (nextAgentId !== agentId) {
+      await this.writeAgentSkillPaths(nextConfigPath, currentSkillPaths);
+    }
 
+    if (nextAgentId !== agentId) {
       this.db
         .query(
           `INSERT OR IGNORE INTO agent_skills (
@@ -343,10 +355,8 @@ export class ManagerStore {
   async deleteAgent(agentId: string): Promise<void> {
     const current = await this.getAgent(agentId);
     if (!current) {
-      throw new Error(`Agent '${agentId}' not found in Codex config`);
+      throw new Error(`Agent '${agentId}' not found`);
     }
-
-    await this.writeAgentConfigValue(`agents.${agentId}`, null, "replace");
 
     this.db.query("DELETE FROM agent_skills WHERE agent_id = ?1").run(agentId);
 
@@ -383,6 +393,8 @@ export class ManagerStore {
       }
     }
 
+    await this.removeSkillPathFromAllAgentConfigs(skill.path || null);
+
     // Remove from agent_skills (unassign from all agents)
     this.db.query("DELETE FROM agent_skills WHERE skill_key = ?1").run(skillKey);
     // Remove from skills_catalog
@@ -408,6 +420,13 @@ export class ManagerStore {
         throw new Error("Remote skill is missing source metadata");
       }
       await this.installRemoteSkill(skill.origin, skill.skillId);
+      await this.refreshLocalSkills();
+    }
+
+    const skillPath = await this.resolveAssignableSkillPath(skill);
+    const existingSkillPaths = await this.readAssignedSkillPathsFromConfig(agent.configFile);
+    if (!existingSkillPaths.includes(skillPath)) {
+      await this.writeAgentSkillPaths(agent.configFile, [...existingSkillPaths, skillPath]);
     }
 
     this.db
@@ -440,6 +459,18 @@ export class ManagerStore {
     if (!agent) {
       throw new Error(`Agent '${agentId}' does not exist`);
     }
+
+    const skill = this.resolveSkillRecord(skillKey);
+    if (!skill) {
+      throw new Error(`Skill '${skillKey}' not found`);
+    }
+
+    const skillPath = await this.resolveAssignableSkillPath(skill);
+    const existingSkillPaths = await this.readAssignedSkillPathsFromConfig(agent.configFile);
+    await this.writeAgentSkillPaths(
+      agent.configFile,
+      existingSkillPaths.filter((currentPath) => currentPath !== skillPath),
+    );
 
     this.db
       .query(`DELETE FROM agent_skills WHERE agent_id = ?1 AND skill_key = ?2`)
@@ -788,11 +819,6 @@ export class ManagerStore {
   async updateSettings(input: UpdateSettingsInput): Promise<MultiAgentSettings> {
     await this.writeAgentConfigValues([
       {
-        keyPath: "features.multi_agent",
-        value: input.multiAgentEnabled,
-        mergeStrategy: "upsert",
-      },
-      {
         keyPath: "agents.max_threads",
         value: input.maxThreads,
         mergeStrategy: "upsert",
@@ -823,53 +849,28 @@ export class ManagerStore {
     const globalModel = resolvedConfig.config.model || DEFAULT_MODEL;
     const globalReasoning =
       resolvedConfig.config.model_reasoning_effort || DEFAULT_REASONING;
-
-    const agentsSection = resolvedConfig.config.agents || {};
-    const entries = Object.entries(agentsSection).filter(([key, value]) => {
-      if (RESERVED_AGENT_KEYS.has(key)) return false;
-      return Boolean(value && typeof value === "object");
-    });
-
-    const counts = this.db
-      .query(
-        `SELECT agent_id as agentId, COUNT(*) as count
-         FROM agent_skills
-         GROUP BY agent_id`,
-      )
-      .all() as Array<{ agentId: string; count: number }>;
-
-    const countByAgent = new Map<string, number>();
-    for (const row of counts) {
-      countByAgent.set(row.agentId, row.count);
-    }
+    const configFiles = await this.listAgentConfigFiles();
 
     const agents = await Promise.all(
-      entries.map(async ([agentKey, raw]) => {
-        const parsedEntry = raw as {
-          description?: string;
-          config_file?: string;
-        };
-        if (!parsedEntry.config_file) {
-          return null;
-        }
-
+      configFiles.map(async (configFile) => {
+        const fallbackName = path.basename(configFile, ".toml");
         const parsedConfig = await this.readAgentConfigFile(
-          parsedEntry.config_file,
+          configFile,
+          fallbackName,
+          "",
           globalModel,
           globalReasoning,
         );
 
-        const skillCount = countByAgent.get(agentKey) || 0;
-
         return {
-          id: agentKey,
-          name: agentKey,
-          description: parsedEntry.description || "",
+          id: parsedConfig.name,
+          name: parsedConfig.name,
+          description: parsedConfig.description,
           model: parsedConfig.model,
           reasoningEffort: parsedConfig.reasoningEffort,
           instructions: parsedConfig.instructions,
-          configFile: parsedEntry.config_file,
-          skillCount,
+          configFile,
+          skillCount: parsedConfig.skillPaths.length,
         } satisfies AgentRecord;
       }),
     );
@@ -880,11 +881,9 @@ export class ManagerStore {
   }
 
   private getMultiAgentSettings(configRead: ConfigReadResult): MultiAgentSettings {
-    const features = configRead.config.features || {};
     const agentsSection = configRead.config.agents || {};
 
     return {
-      multiAgentEnabled: features.multi_agent === true,
       maxThreads: this.parseOptionalPositiveInteger(agentsSection.max_threads),
       maxDepth: this.parseOptionalPositiveInteger(agentsSection.max_depth),
       jobMaxRuntimeSeconds: this.parseOptionalPositiveInteger(
@@ -933,26 +932,14 @@ export class ManagerStore {
       .all() as SkillRecord[];
   }
 
-  private getAssignedSkills(agentId: string): SkillRecord[] {
-    return this.db
-      .query(
-        `SELECT
-          a.skill_key as key,
-          a.source as source,
-          a.origin as origin,
-          a.skill_id as skillId,
-          a.name as name,
-          c.description as description,
-          c.path as path,
-          c.scope as scope,
-          c.installs as installs
-         FROM agent_skills a
-         LEFT JOIN skills_catalog c
-           ON c.skill_key = a.skill_key
-         WHERE a.agent_id = ?1
-         ORDER BY a.created_at DESC`,
-      )
-      .all(agentId) as SkillRecord[];
+  private async getAssignedSkills(agentId: string): Promise<SkillRecord[]> {
+    const agent = await this.getAgent(agentId);
+    if (!agent) {
+      return [];
+    }
+
+    const skillPaths = await this.readAssignedSkillPathsFromConfig(agent.configFile);
+    return skillPaths.map((skillPath) => this.resolveSkillRecordByPath(skillPath));
   }
 
   private findSkillRecord(skillKey: string): SkillRecord | null {
@@ -995,6 +982,26 @@ export class ManagerStore {
          LIMIT 1`,
       )
       .get(skillKey) as SkillRecord | null;
+  }
+
+  private findSkillRecordByPath(skillPath: string): SkillRecord | null {
+    return this.db
+      .query(
+        `SELECT
+          skill_key as key,
+          source,
+          origin,
+          skill_id as skillId,
+          name,
+          description,
+          path,
+          scope,
+          installs
+         FROM skills_catalog
+         WHERE path = ?1
+         LIMIT 1`,
+      )
+      .get(skillPath) as SkillRecord | null;
   }
 
   private resolveSkillRecord(skillKey: string): SkillRecord | null {
@@ -1048,6 +1055,25 @@ export class ManagerStore {
     return null;
   }
 
+  private resolveSkillRecordByPath(skillPath: string): SkillRecord {
+    const catalog = this.findSkillRecordByPath(skillPath);
+    if (catalog) {
+      return catalog;
+    }
+
+    return {
+      key: `local:${skillPath}`,
+      source: "local",
+      origin: null,
+      skillId: null,
+      name: path.basename(path.dirname(skillPath)) || path.basename(skillPath) || "local-skill",
+      description: null,
+      path: skillPath,
+      scope: null,
+      installs: null,
+    };
+  }
+
   private async readCodexConfig(): Promise<ConfigReadResult> {
     return callCodexAppServer<ConfigReadResult>("config/read", {
       includeLayers: false,
@@ -1070,23 +1096,12 @@ export class ManagerStore {
     return null;
   }
 
-  private async writeAgentConfigValue(
-    keyPath: string,
-    value: unknown,
-    mergeStrategy: ConfigMergeStrategy = "upsert",
-  ): Promise<void> {
-    const result = await callCodexAppServer<ConfigWriteResult>(
-      "config/value/write",
-      {
-        keyPath,
-        value,
-        mergeStrategy,
-      },
-    );
-
-    if (!result || (result.status !== "ok" && result.status !== "okOverridden")) {
-      throw new Error(`Failed to write config key '${keyPath}'`);
+  private requireAgentField(value: string, label: string): string {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      throw new Error(`${label} is required`);
     }
+    return trimmed;
   }
 
   private async writeAgentConfigValues(edits: ConfigEdit[]): Promise<void> {
@@ -1102,24 +1117,32 @@ export class ManagerStore {
 
   private async readAgentConfigFile(
     configFile: string,
+    fallbackName: string,
+    fallbackDescription: string,
     fallbackModel: string,
     fallbackReasoning: ReasoningEffort,
-  ): Promise<{ model: string; reasoningEffort: ReasoningEffort; instructions: string }> {
+  ): Promise<ResolvedAgentConfig> {
     try {
       await access(configFile, fsConstants.F_OK);
       const content = await Bun.file(configFile).text();
       const parsed = Bun.TOML.parse(content) as AgentConfigFile;
 
       return {
+        name: parsed.name || fallbackName,
+        description: parsed.description || fallbackDescription,
         model: parsed.model || fallbackModel,
         reasoningEffort: parsed.model_reasoning_effort || fallbackReasoning,
         instructions: parsed.developer_instructions || "",
+        skillPaths: this.parseAgentSkillPaths(parsed),
       };
     } catch {
       return {
+        name: fallbackName,
+        description: fallbackDescription,
         model: fallbackModel,
         reasoningEffort: fallbackReasoning,
         instructions: "",
+        skillPaths: [],
       };
     }
   }
@@ -1130,14 +1153,303 @@ export class ManagerStore {
   ): Promise<void> {
     await mkdir(path.dirname(configFile), { recursive: true });
 
-    const lines = [
-      `model = ${JSON.stringify(data.model || DEFAULT_MODEL)}`,
-      `model_reasoning_effort = ${JSON.stringify(data.model_reasoning_effort || DEFAULT_REASONING)}`,
-      `developer_instructions = ${JSON.stringify(data.developer_instructions || "")}`,
-      "",
-    ];
+    const existing = await this.readRawAgentConfig(configFile);
+    const nextConfig: AgentConfigFile = {
+      ...existing,
+      name: data.name || "",
+      description: data.description || "",
+      model: data.model || DEFAULT_MODEL,
+      model_reasoning_effort: data.model_reasoning_effort || DEFAULT_REASONING,
+      developer_instructions: data.developer_instructions || "",
+    };
 
-    await writeFile(configFile, lines.join("\n"), "utf8");
+    await writeFile(configFile, this.stringifyAgentConfig(nextConfig), "utf8");
+  }
+
+  private async readRawAgentConfig(configFile: string): Promise<AgentConfigFile> {
+    try {
+      await access(configFile, fsConstants.F_OK);
+      const content = await Bun.file(configFile).text();
+      const parsed = Bun.TOML.parse(content);
+      return this.isTomlTable(parsed) ? (parsed as AgentConfigFile) : {};
+    } catch {
+      return {};
+    }
+  }
+
+  private parseAgentSkillPaths(config: AgentConfigFile): string[] {
+    const entries = config.skills?.config;
+    if (!Array.isArray(entries)) {
+      return [];
+    }
+
+    return entries
+      .filter(
+        (entry): entry is { path: string; enabled?: boolean } =>
+          Boolean(entry) &&
+          typeof entry === "object" &&
+          typeof entry.path === "string" &&
+          entry.path.trim().length > 0 &&
+          entry.enabled !== false,
+      )
+      .map((entry) => entry.path.trim());
+  }
+
+  private async readAssignedSkillPathsFromConfig(configFile: string): Promise<string[]> {
+    const config = await this.readRawAgentConfig(configFile);
+    return this.parseAgentSkillPaths(config);
+  }
+
+  private async writeAgentSkillPaths(
+    configFile: string,
+    skillPaths: string[],
+  ): Promise<void> {
+    const existing = await this.readRawAgentConfig(configFile);
+    const dedupedSkillPaths = Array.from(new Set(skillPaths.map((value) => value.trim()).filter(Boolean)));
+    const nextConfig: AgentConfigFile = { ...existing };
+    const existingSkillsSection = this.isTomlTable(existing.skills) ? { ...existing.skills } : {};
+
+    if (dedupedSkillPaths.length === 0) {
+      delete existingSkillsSection.config;
+      if (Object.keys(existingSkillsSection).length === 0) {
+        delete nextConfig.skills;
+      } else {
+        nextConfig.skills = existingSkillsSection;
+      }
+    } else {
+      nextConfig.skills = {
+        ...existingSkillsSection,
+        config: dedupedSkillPaths.map((skillPath) => ({
+          path: skillPath,
+          enabled: true,
+        })),
+      };
+    }
+
+    await writeFile(configFile, this.stringifyAgentConfig(nextConfig), "utf8");
+  }
+
+  private async removeSkillPathFromAllAgentConfigs(skillPath: string | null): Promise<void> {
+    if (!skillPath) {
+      return;
+    }
+
+    const configFiles = await this.listAgentConfigFiles();
+    await Promise.all(
+      configFiles.map(async (configFile) => {
+        const currentPaths = await this.readAssignedSkillPathsFromConfig(configFile);
+        if (!currentPaths.includes(skillPath)) {
+          return;
+        }
+
+        await this.writeAgentSkillPaths(
+          configFile,
+          currentPaths.filter((currentPath) => currentPath !== skillPath),
+        );
+      }),
+    );
+  }
+
+  private async resolveAssignableSkillPath(skill: SkillRecord): Promise<string> {
+    if (skill.path) {
+      return skill.path;
+    }
+
+    if (skill.source === "local" && skill.key.startsWith("local:")) {
+      return skill.key.slice("local:".length);
+    }
+
+    if (skill.source === "remote" && skill.skillId) {
+      const localSkills = this.getSkills().filter((entry) => entry.source === "local" && entry.path);
+      const installed = localSkills.find((entry) => {
+        if (!entry.path) return false;
+        const pathSkillId = path.basename(path.dirname(entry.path));
+        return pathSkillId === skill.skillId || entry.name === skill.skillId;
+      });
+
+      if (installed?.path) {
+        return installed.path;
+      }
+    }
+
+    throw new Error(`Skill '${skill.name}' is missing a local path`);
+  }
+
+  private stringifyAgentConfig(config: AgentConfigFile): string {
+    const lines: string[] = [];
+    this.writeTomlSection(lines, [], config);
+
+    if (lines[lines.length - 1] !== "") {
+      lines.push("");
+    }
+
+    return lines.join("\n");
+  }
+
+  private writeTomlSection(
+    lines: string[],
+    pathSegments: string[],
+    value: Record<string, unknown>,
+  ): void {
+    const scalarEntries: Array<[string, unknown]> = [];
+    const tableEntries: Array<[string, Record<string, unknown>]> = [];
+    const arrayTableEntries: Array<[string, Array<Record<string, unknown>>]> = [];
+
+    for (const [key, entryValue] of Object.entries(value)) {
+      if (entryValue === undefined || entryValue === null) {
+        continue;
+      }
+
+      if (this.isTomlTable(entryValue)) {
+        tableEntries.push([key, entryValue]);
+        continue;
+      }
+
+      if (this.isArrayOfTomlTables(entryValue)) {
+        arrayTableEntries.push([key, entryValue]);
+        continue;
+      }
+
+      scalarEntries.push([key, entryValue]);
+    }
+
+    if (pathSegments.length > 0 && scalarEntries.length > 0) {
+      this.ensureTomlSectionSpacing(lines);
+      lines.push(`[${pathSegments.map((segment) => this.formatTomlKey(segment)).join(".")}]`);
+    }
+
+    for (const [key, entryValue] of scalarEntries) {
+      lines.push(`${this.formatTomlKey(key)} = ${this.formatTomlValue(entryValue, key)}`);
+    }
+
+    for (const [key, childValue] of tableEntries) {
+      this.writeTomlSection(lines, [...pathSegments, key], childValue);
+    }
+
+    for (const [key, items] of arrayTableEntries) {
+      for (const item of items) {
+        this.writeTomlArrayTable(lines, [...pathSegments, key], item);
+      }
+    }
+  }
+
+  private writeTomlArrayTable(
+    lines: string[],
+    pathSegments: string[],
+    value: Record<string, unknown>,
+  ): void {
+    const scalarEntries: Array<[string, unknown]> = [];
+    const tableEntries: Array<[string, Record<string, unknown>]> = [];
+    const arrayTableEntries: Array<[string, Array<Record<string, unknown>>]> = [];
+
+    for (const [key, entryValue] of Object.entries(value)) {
+      if (entryValue === undefined || entryValue === null) {
+        continue;
+      }
+
+      if (this.isTomlTable(entryValue)) {
+        tableEntries.push([key, entryValue]);
+        continue;
+      }
+
+      if (this.isArrayOfTomlTables(entryValue)) {
+        arrayTableEntries.push([key, entryValue]);
+        continue;
+      }
+
+      scalarEntries.push([key, entryValue]);
+    }
+
+    this.ensureTomlSectionSpacing(lines);
+    lines.push(`[[${pathSegments.map((segment) => this.formatTomlKey(segment)).join(".")}]]`);
+
+    for (const [key, entryValue] of scalarEntries) {
+      lines.push(`${this.formatTomlKey(key)} = ${this.formatTomlValue(entryValue, key)}`);
+    }
+
+    for (const [key, childValue] of tableEntries) {
+      this.writeTomlSection(lines, [...pathSegments, key], childValue);
+    }
+
+    for (const [key, items] of arrayTableEntries) {
+      for (const item of items) {
+        this.writeTomlArrayTable(lines, [...pathSegments, key], item);
+      }
+    }
+  }
+
+  private ensureTomlSectionSpacing(lines: string[]): void {
+    if (lines.length === 0) {
+      return;
+    }
+
+    if (lines[lines.length - 1] !== "") {
+      lines.push("");
+    }
+  }
+
+  private formatTomlKey(key: string): string {
+    return /^[A-Za-z0-9_-]+$/.test(key) ? key : JSON.stringify(key);
+  }
+
+  private formatTomlValue(value: unknown, key?: string): string {
+    if (typeof value === "string") {
+      return this.formatTomlString(value, key === "developer_instructions");
+    }
+
+    if (typeof value === "number") {
+      if (!Number.isFinite(value)) {
+        throw new Error("Cannot serialize non-finite number in agent config");
+      }
+      return String(value);
+    }
+
+    if (typeof value === "boolean") {
+      return value ? "true" : "false";
+    }
+
+    if (value instanceof Date) {
+      return value.toISOString();
+    }
+
+    if (Array.isArray(value)) {
+      return `[${value.map((entry) => this.formatTomlValue(entry)).join(", ")}]`;
+    }
+
+    throw new Error(`Unsupported agent config value: ${String(value)}`);
+  }
+
+  private formatTomlString(value: string, forceMultiline = false): string {
+    const normalized = value.replace(/\r\n/g, "\n");
+    if (!forceMultiline && !normalized.includes("\n")) {
+      return JSON.stringify(normalized);
+    }
+
+    const escaped = normalized
+      .replace(/\\/g, "\\\\")
+      .replace(/"""/g, '\\"""');
+
+    return `"""\n${escaped}\n"""`;
+  }
+
+  private isTomlTable(value: unknown): value is Record<string, unknown> {
+    return Boolean(value) && typeof value === "object" && !Array.isArray(value) && !(value instanceof Date);
+  }
+
+  private isArrayOfTomlTables(value: unknown): value is Array<Record<string, unknown>> {
+    return Array.isArray(value) && value.length > 0 && value.every((entry) => this.isTomlTable(entry));
+  }
+
+  private async listAgentConfigFiles(): Promise<string[]> {
+    try {
+      const entries = await readdir(this.agentConfigDir, { withFileTypes: true });
+      return entries
+        .filter((entry) => entry.isFile() && entry.name.endsWith(".toml"))
+        .map((entry) => path.join(this.agentConfigDir, entry.name))
+        .sort((a, b) => a.localeCompare(b));
+    } catch {
+      return [];
+    }
   }
 
   private upsertLocalSkillCatalogEntry(

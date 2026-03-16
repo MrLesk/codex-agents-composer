@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
 import { useForm, type UseFormRegister } from "react-hook-form";
-import { Loader2, Save, Settings2 } from "lucide-react";
+import { ArrowLeft, Loader2, Save, Settings2 } from "lucide-react";
+import { Link } from "react-router";
 import type { MultiAgentSettings, UpdateSettingsInput } from "../types";
 import { useManager } from "../context/ManagerContext";
 
 interface SettingsFormValues {
-  multiAgentEnabled: boolean;
   maxThreads: string;
   maxDepth: string;
   jobMaxRuntimeSeconds: string;
@@ -29,7 +29,6 @@ function toFieldValue(value: number | null): string {
 
 function toFormValues(settings: MultiAgentSettings): SettingsFormValues {
   return {
-    multiAgentEnabled: settings.multiAgentEnabled,
     maxThreads: toFieldValue(settings.maxThreads),
     maxDepth: toFieldValue(settings.maxDepth),
     jobMaxRuntimeSeconds: toFieldValue(settings.jobMaxRuntimeSeconds),
@@ -113,11 +112,9 @@ export function SettingsPage() {
     register,
     handleSubmit,
     reset,
-    watch,
     formState: { errors, isDirty },
   } = useForm<SettingsFormValues>({
     defaultValues: {
-      multiAgentEnabled: false,
       maxThreads: "",
       maxDepth: "",
       jobMaxRuntimeSeconds: "",
@@ -131,9 +128,6 @@ export function SettingsPage() {
     setSaveError(null);
     setSaveSuccess(null);
   }, [reset, settings]);
-
-  const multiAgentEnabled = watch("multiAgentEnabled");
-
   const onSubmit = async (values: SettingsFormValues) => {
     setSaving(true);
     setSaveError(null);
@@ -141,7 +135,6 @@ export function SettingsPage() {
 
     try {
       const input: UpdateSettingsInput = {
-        multiAgentEnabled: values.multiAgentEnabled,
         maxThreads: parseOptionalPositiveInteger(values.maxThreads, 12),
         maxDepth: parseOptionalPositiveInteger(values.maxDepth, 4),
         jobMaxRuntimeSeconds: parseOptionalPositiveInteger(values.jobMaxRuntimeSeconds),
@@ -170,46 +163,25 @@ export function SettingsPage() {
   return (
     <section className="p-7 md:p-9 max-w-4xl mx-auto">
       <div className="mb-7">
+        <Link
+          to="/"
+          className="text-xs text-gray-400 hover:text-gray-200 inline-flex items-center gap-1"
+        >
+          <ArrowLeft className="w-3 h-3" />
+          Back to catalog
+        </Link>
         <div className="inline-flex items-center gap-2 rounded-full border border-gray-800 bg-[#121212] px-3 py-1 text-xs text-gray-400">
           <Settings2 className="h-3.5 w-3.5" />
           Settings
         </div>
-        <h1 className="mt-4 text-2xl text-gray-100">Multi-Agent Settings</h1>
+        <h1 className="mt-4 text-2xl text-gray-100">Agent Settings</h1>
         <p className="mt-2 max-w-2xl text-sm leading-6 text-gray-500">
-          Control the Codex config values used for multi-agent orchestration. Leave
+          Control the Codex config values used for agent orchestration. Leave
           numeric fields blank to fall back to Codex defaults.
         </p>
       </div>
 
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
-        <section className="rounded-2xl border border-gray-800 bg-[#101010] p-5">
-          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-            <div className="max-w-2xl">
-              <h2 className="text-base text-gray-100">Enable Multi-Agent Mode</h2>
-              <p className="mt-1 text-sm leading-6 text-gray-500">
-                Turns `features.multi_agent` on or off. When disabled, the app
-                will stop offering the “New Agent” action but will still show any
-                existing agents.
-              </p>
-            </div>
-
-            <label className="inline-flex cursor-pointer items-center gap-3 self-start md:self-center">
-              <span className="text-sm text-gray-300">
-                {multiAgentEnabled ? "On" : "Off"}
-              </span>
-              <span className="relative inline-flex h-7 w-12 items-center">
-                <input
-                  type="checkbox"
-                  className="peer sr-only"
-                  {...register("multiAgentEnabled")}
-                />
-                <span className="absolute inset-0 rounded-full bg-gray-700 transition peer-checked:bg-blue-500/80" />
-                <span className="absolute left-1 h-5 w-5 rounded-full bg-white transition peer-checked:translate-x-5" />
-              </span>
-            </label>
-          </div>
-        </section>
-
         <section className="rounded-2xl border border-gray-800 bg-[#101010] p-5">
           <div className="mb-4">
             <h2 className="text-base text-gray-100">Agent Limits</h2>

@@ -17,6 +17,10 @@ interface AgentFormValues {
   instructions: string;
 }
 
+function validateRequiredText(label: string) {
+  return (value: string) => value.trim().length > 0 || `${label} is required`;
+}
+
 function resolveReasoningOptions(model: ModelOption | undefined): ReasoningEffort[] {
   if (!model) return ["low", "medium", "high"];
   return model.supportedReasoningEfforts.length > 0
@@ -64,7 +68,7 @@ export function AgentPage() {
     watch,
     reset,
     setValue,
-    formState: { isDirty },
+    formState: { errors, isDirty },
   } = useForm<AgentFormValues>({
     defaultValues: {
       name: "",
@@ -392,10 +396,15 @@ export function AgentPage() {
         <div className="space-y-1.5">
           <label className="text-xs text-gray-400">Name</label>
           <input
-            {...register("name", { required: true })}
+            {...register("name", {
+              validate: validateRequiredText("Name"),
+            })}
             className="w-full bg-transparent border-0 border-b border-gray-700 px-0 py-1 text-lg text-gray-100 rounded-none focus:outline-none focus:border-blue-500/60"
             placeholder="reviewer_agent"
           />
+          {errors.name?.message ? (
+            <p className="text-[11px] text-red-300">{errors.name.message}</p>
+          ) : null}
           <p className="text-[11px] text-gray-600">
             Used as the agent key in Codex config.
           </p>
@@ -436,11 +445,16 @@ export function AgentPage() {
             Description <span className="text-gray-600">(guidance Codex uses to choose this role)</span>
           </label>
           <textarea
-            {...register("description")}
+            {...register("description", {
+              validate: validateRequiredText("Description"),
+            })}
             rows={3}
             className="w-full bg-[#161616] border border-gray-800 rounded-lg px-4 py-2.5 text-sm text-gray-100"
             placeholder="What this agent is for"
           />
+          {errors.description?.message ? (
+            <p className="text-[11px] text-red-300">{errors.description.message}</p>
+          ) : null}
         </div>
 
         <div className="space-y-1.5">
@@ -448,11 +462,16 @@ export function AgentPage() {
             Developer Instructions <span className="text-gray-600">(extra role-specific instructions applied on spawn)</span>
           </label>
           <textarea
-            {...register("instructions")}
+            {...register("instructions", {
+              validate: validateRequiredText("Developer Instructions"),
+            })}
             rows={6}
             className="w-full bg-[#161616] border border-gray-800 rounded-lg px-4 py-3 text-sm text-gray-100 font-mono"
             placeholder="Instructions written into the agent config file"
           />
+          {errors.instructions?.message ? (
+            <p className="text-[11px] text-red-300">{errors.instructions.message}</p>
+          ) : null}
         </div>
       </div>
 
