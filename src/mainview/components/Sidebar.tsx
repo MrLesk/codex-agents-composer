@@ -13,7 +13,7 @@ import { clsx } from "clsx";
 import { fetchAgentDetail } from "../api";
 import { useManager } from "../context/ManagerContext";
 import { clearActiveSkillDrag, getActiveSkillDrag, setActiveSkillDrag } from "../skillDragState";
-import type { Skill } from "../types";
+import type { AgentScope, Skill } from "../types";
 import appLogo from "../assets/app-logo.png";
 
 const SKILL_MIME_TYPE = "application/x-codex-skill";
@@ -45,6 +45,19 @@ function formatReasoningLabel(reasoningEffort: string): string {
   if (!lower) return "";
   if (lower === "xhigh") return "XHigh";
   return lower.charAt(0).toUpperCase() + lower.slice(1);
+}
+
+function formatAgentScopeLabel(scope: AgentScope, projectPath: string | null): string {
+  if (scope === "global") {
+    return "Global";
+  }
+
+  if (!projectPath) {
+    return "Project";
+  }
+
+  const segments = projectPath.split(/[\\/]/).filter(Boolean);
+  return segments[segments.length - 1] || projectPath;
 }
 
 export function Sidebar() {
@@ -339,8 +352,12 @@ export function Sidebar() {
                       ({formatModelLabel(agent.model)} - {formatReasoningLabel(agent.reasoningEffort)})
                     </span>
                   </p>
-                  <p className="text-[11px] text-gray-500 truncate mt-0.5">
-                    {agent.description || "No description"}
+                  <p
+                    className="text-[11px] text-gray-500 truncate mt-0.5"
+                    title={agent.scope === "project" ? agent.projectPath || agent.description : agent.description}
+                  >
+                    {formatAgentScopeLabel(agent.scope, agent.projectPath)}
+                    {agent.description ? ` · ${agent.description}` : ""}
                   </p>
                 </div>
               </Link>

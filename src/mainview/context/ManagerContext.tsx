@@ -20,12 +20,15 @@ import type {
   Agent,
   ModelOption,
   MultiAgentSettings,
+  ProjectOption,
   Skill,
   UpdateSettingsInput,
 } from "../types";
 
 interface ManagerContextValue {
   agents: Agent[];
+  projects: ProjectOption[];
+  activeProjectPath: string | null;
   skills: Skill[];
   models: ModelOption[];
   settings: MultiAgentSettings | null;
@@ -46,6 +49,8 @@ const ManagerContext = createContext<ManagerContextValue | null>(null);
 
 export function ManagerProvider({ children }: { children: ReactNode }) {
   const [agents, setAgents] = useState<Agent[]>([]);
+  const [projects, setProjects] = useState<ProjectOption[]>([]);
+  const [activeProjectPath, setActiveProjectPath] = useState<string | null>(null);
   const [skills, setSkills] = useState<Skill[]>([]);
   const [models, setModels] = useState<ModelOption[]>([]);
   const [settings, setSettings] = useState<MultiAgentSettings | null>(null);
@@ -56,6 +61,8 @@ export function ManagerProvider({ children }: { children: ReactNode }) {
   const syncBootstrapSnapshot = useCallback(async (refreshRemote = false) => {
     const payload = await fetchBootstrap(refreshRemote);
     setAgents(payload.agents);
+    setProjects(payload.projects);
+    setActiveProjectPath(payload.activeProjectPath);
     setSkills(payload.skills);
     setModels(payload.models);
     setSettings(payload.settings);
@@ -196,6 +203,8 @@ export function ManagerProvider({ children }: { children: ReactNode }) {
   const value = useMemo(
     () => ({
       agents,
+      projects,
+      activeProjectPath,
       skills,
       models,
       settings,
@@ -213,6 +222,8 @@ export function ManagerProvider({ children }: { children: ReactNode }) {
     }),
     [
       agents,
+      projects,
+      activeProjectPath,
       skills,
       models,
       settings,

@@ -1,24 +1,86 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router";
 import { useForm } from "react-hook-form";
-import { ArrowLeft, Check, ChevronDown, Copy, Loader2, Plus, Save, Search, TriangleAlert } from "lucide-react";
+import { ArrowLeft, Check, ChevronDown, Copy, FolderOpen, Loader2, Plus, Save, Search, TriangleAlert } from "lucide-react";
 import { createAgent, fetchAgentDetail, updateAgent } from "../api";
 import { SkillCard } from "../components/SkillCard";
 import { useManager } from "../context/ManagerContext";
 import { useSkillSearch } from "../hooks/useSkillSearch";
 import { getActiveSkillDrag } from "../skillDragState";
-import type { ModelOption, ReasoningEffort, Skill } from "../types";
+import type { AgentScope, ModelOption, ReasoningEffort, Skill } from "../types";
 
 interface AgentFormValues {
   name: string;
   description: string;
+  scope: AgentScope;
+  projectSelection: string;
+  projectPath: string;
   model: string;
   reasoningEffort: ReasoningEffort;
   instructions: string;
 }
 
+type FolderPickerFile = File & {
+  path?: string;
+  webkitRelativePath?: string;
+};
+
 function validateRequiredText(label: string) {
   return (value: string) => value.trim().length > 0 || `${label} is required`;
+}
+
+function dirnamePath(value: string): string {
+  return value.replace(/[\\/][^\\/]+$/, "");
+}
+
+function deriveSelectedFolderPath(files: FileList | null): string | null {
+  if (!files || files.length === 0) {
+    return null;
+  }
+
+  const firstFile = files[0] as FolderPickerFile;
+  const absoluteFilePath = typeof firstFile.path === "string" ? firstFile.path : "";
+  if (!absoluteFilePath) {
+    return null;
+  }
+
+  const relativePath =
+    typeof firstFile.webkitRelativePath === "string" ? firstFile.webkitRelativePath : "";
+  if (!relativePath) {
+    return dirnamePath(absoluteFilePath);
+  }
+
+  const relativeDirectories = relativePath.split("/").filter(Boolean).slice(0, -1);
+  let selectedFolder = dirnamePath(absoluteFilePath);
+  for (let index = 1; index < relativeDirectories.length; index += 1) {
+    selectedFolder = dirnamePath(selectedFolder);
+  }
+
+  return selectedFolder;
+}
+
+function resolveProjectSelectionValue(
+  projectPath: string | null,
+  knownProjectPaths: string[],
+  customValue: string,
+): string {
+  if (!projectPath) {
+    return knownProjectPaths[0] || customValue;
+  }
+
+  return knownProjectPaths.includes(projectPath) ? projectPath : customValue;
+}
+
+function resolveDefaultProjectSelection(
+  activeProjectPath: string | null,
+  knownProjectPaths: string[],
+  customValue: string,
+): string {
+  if (activeProjectPath && knownProjectPaths.includes(activeProjectPath)) {
+    return activeProjectPath;
+  }
+
+  return knownProjectPaths[0] || customValue;
 }
 
 function resolveReasoningOptions(model: ModelOption | undefined): ReasoningEffort[] {
@@ -31,6 +93,7 @@ function resolveReasoningOptions(model: ModelOption | undefined): ReasoningEffor
 const FALLBACK_MODEL = "gpt-5.3-codex";
 const FALLBACK_REASONING: ReasoningEffort = "medium";
 const SKILL_MIME_TYPE = "application/x-codex-skill";
+const CUSTOM_PROJECT_VALUE = "__custom__";
 
 export function AgentPage() {
   const { agentId } = useParams<{ agentId: string }>();
@@ -40,6 +103,8 @@ export function AgentPage() {
   const isCreate = isCreateRoute || !agentId || agentId === "new";
   const {
     models,
+    projects,
+    activeProjectPath,
     skills: catalogSkills,
     upsertAgent,
     assignSkillToAgent,
@@ -61,6 +126,7 @@ export function AgentPage() {
   const [agentConfigPath, setAgentConfigPath] = useState<string | null>(null);
   const [configPathCopied, setConfigPathCopied] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [persistedAgentName, setPersistedAgentName] = useState("");
 
   const {
     register,
@@ -73,6 +139,13 @@ export function AgentPage() {
     defaultValues: {
       name: "",
       description: "",
+      scope: "global",
+      projectSelection: resolveDefaultProjectSelection(
+        activeProjectPath,
+        projects.map((project) => project.path),
+        CUSTOM_PROJECT_VALUE,
+      ),
+      projectPath: "",
       model: models[0]?.id || FALLBACK_MODEL,
       reasoningEffort: models[0]?.defaultReasoningEffort || FALLBACK_REASONING,
       instructions: "",
@@ -87,9 +160,17 @@ export function AgentPage() {
           setAssignedSkills(payload.assignedSkills);
           setAllSkills(payload.allSkills);
           setAgentConfigPath(payload.agent.configFile || null);
+          setPersistedAgentName(payload.agent.name);
           reset({
             name: payload.agent.name,
             description: payload.agent.description,
+            scope: payload.agent.scope,
+            projectSelection: resolveProjectSelectionValue(
+              payload.agent.projectPath,
+              projects.map((project) => project.path),
+              CUSTOM_PROJECT_VALUE,
+            ),
+            projectPath: payload.agent.projectPath || "",
             model: payload.agent.model,
             reasoningEffort: payload.agent.reasoningEffort,
             instructions: payload.agent.instructions,
@@ -105,14 +186,22 @@ export function AgentPage() {
     setAssignedSkills([]);
     setAllSkills(catalogSkills);
     setAgentConfigPath(null);
+    setPersistedAgentName("");
     reset({
       name: "",
       description: "",
+      scope: "global",
+      projectSelection: resolveDefaultProjectSelection(
+        activeProjectPath,
+        projects.map((project) => project.path),
+        CUSTOM_PROJECT_VALUE,
+      ),
+      projectPath: "",
       model: models[0]?.id || FALLBACK_MODEL,
       reasoningEffort: models[0]?.defaultReasoningEffort || FALLBACK_REASONING,
       instructions: "",
     });
-  }, [agentId, isCreate, reset]);
+  }, [activeProjectPath, agentId, isCreate, projects, reset]);
 
   useEffect(() => {
     if (!isCreate) return;
@@ -131,8 +220,53 @@ export function AgentPage() {
   }, [agentId, isCreate]);
 
   const selectedModelId = watch("model");
+  const selectedScope = watch("scope");
+  const selectedProjectSelection = watch("projectSelection");
+  const selectedProjectPath = watch("projectPath");
   const selectedModel = models.find((model) => model.id === selectedModelId);
   const reasoningOptions = resolveReasoningOptions(selectedModel);
+  const knownProjectPaths = useMemo(
+    () => projects.map((project) => project.path),
+    [projects],
+  );
+
+  useEffect(() => {
+    if (selectedScope !== "project") {
+      return;
+    }
+
+    if (!selectedProjectSelection) {
+      setValue(
+        "projectSelection",
+        resolveDefaultProjectSelection(
+          activeProjectPath,
+          knownProjectPaths,
+          CUSTOM_PROJECT_VALUE,
+        ),
+        {
+          shouldDirty: true,
+        },
+      );
+      return;
+    }
+
+    if (
+      selectedProjectSelection === CUSTOM_PROJECT_VALUE &&
+      selectedProjectPath &&
+      knownProjectPaths.includes(selectedProjectPath)
+    ) {
+      setValue("projectSelection", selectedProjectPath, {
+        shouldDirty: false,
+      });
+    }
+  }, [
+    knownProjectPaths,
+    activeProjectPath,
+    selectedProjectPath,
+    selectedProjectSelection,
+    selectedScope,
+    setValue,
+  ]);
 
   useEffect(() => {
     const current = watch("reasoningEffort");
@@ -170,7 +304,11 @@ export function AgentPage() {
   );
 
   const deleteTargetId = agentId || "";
-  const canDelete = !isCreate && deleteTargetId.length > 0 && deleteConfirmText.trim() === deleteTargetId;
+  const deleteConfirmTarget = persistedAgentName || watch("name").trim();
+  const canDelete =
+    !isCreate &&
+    deleteConfirmTarget.length > 0 &&
+    deleteConfirmText.trim() === deleteConfirmTarget;
   const createSkillHref =
     !isCreate && agentId
       ? `/skill/new?assignToAgentId=${encodeURIComponent(agentId)}&returnTo=${encodeURIComponent(`${location.pathname}${location.search}`)}`
@@ -180,10 +318,19 @@ export function AgentPage() {
     setSaving(true);
     setSaveError(null);
     try {
+      const resolvedProjectPath =
+        formValues.scope === "project"
+          ? formValues.projectSelection === CUSTOM_PROJECT_VALUE
+            ? formValues.projectPath
+            : formValues.projectSelection
+          : null;
+
       if (isCreate) {
         const created = await createAgent({
           name: formValues.name,
           description: formValues.description,
+          scope: formValues.scope,
+          projectPath: resolvedProjectPath,
           model: formValues.model,
           reasoningEffort: formValues.reasoningEffort,
           instructions: formValues.instructions,
@@ -197,6 +344,8 @@ export function AgentPage() {
         const updated = await updateAgent(previousId, {
           name: formValues.name,
           description: formValues.description,
+          scope: formValues.scope,
+          projectPath: resolvedProjectPath,
           model: formValues.model,
           reasoningEffort: formValues.reasoningEffort,
           instructions: formValues.instructions,
@@ -213,6 +362,7 @@ export function AgentPage() {
         setAssignedSkills(refreshed.assignedSkills);
         setAllSkills(refreshed.allSkills);
         setAgentConfigPath(refreshed.agent.configFile || null);
+        setPersistedAgentName(refreshed.agent.name);
       }
     } catch (error) {
       setSaveError(error instanceof Error ? error.message : String(error));
@@ -333,6 +483,30 @@ export function AgentPage() {
     }
   };
 
+  const onChooseProjectFolder = () => {
+    setSaveError(null);
+    const input = document.getElementById("custom-project-folder-input") as HTMLInputElement | null;
+    input?.click();
+  };
+
+  const onProjectFolderSelected = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const folderPath = deriveSelectedFolderPath(event.target.files);
+    event.target.value = "";
+
+    if (!folderPath) {
+      setSaveError(
+        "Could not read the selected folder path. You can still type the project path manually.",
+      );
+      return;
+    }
+
+    setValue("projectPath", folderPath, {
+      shouldDirty: true,
+      shouldValidate: true,
+    });
+    setSaveError(null);
+  };
+
   if (loading) {
     return <div className="p-8 text-sm text-gray-500">Loading agent...</div>;
   }
@@ -348,7 +522,9 @@ export function AgentPage() {
             <ArrowLeft className="w-3 h-3" />
             Back to catalog
           </Link>
-          <h1 className="text-2xl mt-2">{isCreate ? "Create Agent" : `Agent · ${agentId}`}</h1>
+          <h1 className="text-2xl mt-2">
+            {isCreate ? "Create Agent" : `Agent · ${watch("name") || persistedAgentName || "Loading..."}`}
+          </h1>
           <p className="text-sm text-gray-500 mt-1">
             Configure model, reasoning, and instructions. Skills are assigned below.
           </p>
@@ -406,8 +582,45 @@ export function AgentPage() {
             <p className="text-[11px] text-red-300">{errors.name.message}</p>
           ) : null}
           <p className="text-[11px] text-gray-600">
-            Used as the agent key in Codex config.
+            Used as the agent key in Codex.
           </p>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+          <div className="space-y-1.5">
+            <label className="text-xs text-gray-400">Scope</label>
+            <select
+              {...register("scope")}
+              className="w-full h-10 bg-[#161616] border border-gray-800 rounded-lg px-4 text-sm text-gray-100"
+            >
+              <option value="global">Global</option>
+              <option value="project">Project-specific</option>
+            </select>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-xs text-gray-400">Project Selection</label>
+            <select
+              {...register("projectSelection")}
+              disabled={selectedScope !== "project"}
+              className="w-full h-10 bg-[#161616] border border-gray-800 rounded-lg px-4 text-sm text-gray-100 disabled:opacity-50"
+            >
+              {selectedScope !== "project" ? (
+                <option value={projects[0]?.path || CUSTOM_PROJECT_VALUE}>Not applicable</option>
+              ) : null}
+              {projects.map((project) => (
+                <option key={project.path} value={project.path}>
+                  {project.label}
+                </option>
+              ))}
+              <option value={CUSTOM_PROJECT_VALUE}>Custom</option>
+            </select>
+            <p className="text-[11px] text-gray-600">
+              {selectedScope === "project"
+                ? "Uses `~/.codex/.codex-global-state.json` first, then falls back to `~/.codex/config.toml`."
+                : "Available when the scope is project-specific."}
+            </p>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
@@ -439,6 +652,47 @@ export function AgentPage() {
             </select>
           </div>
         </div>
+
+        {selectedScope === "project" && selectedProjectSelection === CUSTOM_PROJECT_VALUE ? (
+          <div className="space-y-1.5">
+            <label className="text-xs text-gray-400">Select Folder</label>
+            <div className="flex gap-2">
+              <input
+                {...register("projectPath", {
+                  validate: (value) =>
+                    selectedScope !== "project" ||
+                    selectedProjectSelection !== CUSTOM_PROJECT_VALUE ||
+                    value.trim().length > 0 ||
+                    "Project folder is required",
+                })}
+                className="w-full bg-[#161616] border border-gray-800 rounded-lg px-4 py-2.5 text-sm text-gray-100"
+                placeholder="/absolute/path/to/project"
+              />
+              <button
+                type="button"
+                onClick={onChooseProjectFolder}
+                className="shrink-0 inline-flex items-center gap-1.5 rounded-lg border border-gray-700 bg-[#141414] px-3 py-2 text-sm text-gray-300 hover:text-gray-100 hover:border-gray-600 cursor-pointer"
+              >
+                <FolderOpen className="w-4 h-4" />
+                Choose Folder
+              </button>
+            </div>
+            <input
+              id="custom-project-folder-input"
+              type="file"
+              multiple
+              className="hidden"
+              onChange={onProjectFolderSelected}
+              {...({ webkitdirectory: "", directory: "" } as Record<string, string>)}
+            />
+            {errors.projectPath?.message ? (
+              <p className="text-[11px] text-red-300">{errors.projectPath.message}</p>
+            ) : null}
+            <p className="text-[11px] text-gray-600">
+              The agent will be saved under `.codex/agents/` inside this folder.
+            </p>
+          </div>
+        ) : null}
 
         <div className="space-y-1.5">
           <label className="text-xs text-gray-400">
@@ -618,13 +872,13 @@ export function AgentPage() {
                 Deleting this agent removes its config and unassigns all skills from this agent.
               </p>
               <p className="text-xs text-gray-400">
-                To confirm, type <span className="font-mono text-gray-200">{deleteTargetId}</span> below.
+                To confirm, type <span className="font-mono text-gray-200">{deleteConfirmTarget}</span> below.
               </p>
 
               <input
                 value={deleteConfirmText}
                 onChange={(event) => setDeleteConfirmText(event.target.value)}
-                placeholder="Type agent id to confirm"
+                placeholder="Type agent name to confirm"
                 className="w-full bg-[#161616] border border-rose-500/40 rounded-lg h-10 px-3 text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:border-rose-400/70"
               />
 

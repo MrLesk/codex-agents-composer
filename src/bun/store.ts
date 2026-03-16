@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite";
-import { mkdir, access, writeFile, readFile, readdir, unlink } from "node:fs/promises";
+import { mkdir, access, writeFile, readFile, readdir, stat, unlink } from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
 import { mkdirSync } from "node:fs";
 import os from "node:os";
@@ -9,11 +9,13 @@ import { buildSkillSearchQueryVariants, resolveSkillSearchLookupQuery } from "..
 import type {
   AgentDetailPayload,
   AgentRecord,
+  AgentScope,
   BootstrapPayload,
   CreateAgentInput,
   CreateSkillInput,
   ModelRecord,
   MultiAgentSettings,
+  ProjectOption,
   ReasoningEffort,
   SaveSkillInput,
   SkillDocument,
@@ -67,6 +69,21 @@ interface SkillsListResult {
       scope?: string;
     }>;
   }>;
+}
+
+interface GlobalStateFile {
+  "electron-saved-workspace-roots"?: unknown;
+  "active-workspace-roots"?: unknown;
+}
+
+interface AgentStorageLocation {
+  scope: AgentScope;
+  projectPath: string | null;
+  agentConfigDir: string;
+}
+
+interface KnownAgentConfigFile extends AgentStorageLocation {
+  configFile: string;
 }
 
 interface AgentConfigFile {
@@ -173,11 +190,15 @@ export class ManagerStore {
       this.getSkills(),
       this.getModels(),
     ]);
+    const projects = await this.getProjectOptions();
+    const activeProjectPath = await this.getActiveProjectPath(projects.map((project) => project.path));
 
     return {
       agents,
       skills,
       models,
+      projects,
+      activeProjectPath,
       settings: this.getMultiAgentSettings(configRead),
     };
   }
@@ -209,17 +230,22 @@ export class ManagerStore {
       input.instructions,
       "Agent developer instructions",
     );
+    const storage = await this.resolveAgentStorageLocation(input.scope, input.projectPath);
 
     if (!agentName) {
       throw new Error("Agent name is required");
     }
 
-    const existingAgent = await this.getAgent(agentName);
-    if (existingAgent) {
+    const configPath = path.join(storage.agentConfigDir, `${agentName}.toml`);
+    if (await this.agentConfigFileExists(configPath)) {
       throw new Error(`Agent '${agentName}' already exists`);
     }
-
-    const configPath = path.join(this.agentConfigDir, `${agentName}.toml`);
+    const createdAgentId = this.createAgentRecordId(
+      storage.scope,
+      storage.projectPath,
+      agentName,
+    );
+    await this.rememberProjectPathForDiscovery(storage.projectPath);
     await this.writeAgentConfigFile(configPath, {
       name: agentName,
       description,
@@ -241,11 +267,11 @@ export class ManagerStore {
 
     try {
       for (const skillKey of skillKeys) {
-        await this.assignSkill(agentName, skillKey);
+        await this.assignSkill(createdAgentId, skillKey);
       }
     } catch (error) {
       try {
-        await this.deleteAgent(agentName);
+        await this.deleteAgent(createdAgentId);
       } catch (rollbackError) {
         const message = error instanceof Error ? error.message : String(error);
         const rollbackMessage =
@@ -256,7 +282,7 @@ export class ManagerStore {
       throw error;
     }
 
-    const created = await this.getAgent(agentName);
+    const created = await this.getAgent(createdAgentId);
     if (!created) {
       throw new Error("Failed to create agent");
     }
@@ -276,23 +302,32 @@ export class ManagerStore {
       input.instructions,
       "Agent developer instructions",
     );
+    const nextStorage = await this.resolveAgentStorageLocation(input.scope, input.projectPath);
     if (!nextAgentId) {
       throw new Error("Agent name is required");
     }
 
-    if (nextAgentId !== agentId) {
-      const conflicting = await this.getAgent(nextAgentId);
-      if (conflicting) {
+    const nextIdentityChanged =
+      current.name !== nextAgentId ||
+      current.scope !== nextStorage.scope ||
+      current.projectPath !== nextStorage.projectPath;
+
+    if (nextIdentityChanged) {
+      const candidatePath = path.join(nextStorage.agentConfigDir, `${nextAgentId}.toml`);
+      if (
+        candidatePath !== current.configFile &&
+        (await this.agentConfigFileExists(candidatePath))
+      ) {
         throw new Error(`Agent '${nextAgentId}' already exists`);
       }
     }
 
     const nextConfigPath =
-      nextAgentId === agentId
+      !nextIdentityChanged
         ? current.configFile
-        : path.join(this.agentConfigDir, `${nextAgentId}.toml`);
+        : path.join(nextStorage.agentConfigDir, `${nextAgentId}.toml`);
     const currentSkillPaths =
-      nextAgentId === agentId
+      !nextIdentityChanged
         ? []
         : await this.readAssignedSkillPathsFromConfig(current.configFile);
 
@@ -303,12 +338,18 @@ export class ManagerStore {
       model_reasoning_effort: input.reasoningEffort || DEFAULT_REASONING,
       developer_instructions: instructions,
     });
+    await this.rememberProjectPathForDiscovery(nextStorage.projectPath);
 
-    if (nextAgentId !== agentId) {
+    if (nextIdentityChanged) {
       await this.writeAgentSkillPaths(nextConfigPath, currentSkillPaths);
     }
 
-    if (nextAgentId !== agentId) {
+    if (nextIdentityChanged) {
+      const nextRecordId = this.createAgentRecordId(
+        nextStorage.scope,
+        nextStorage.projectPath,
+        nextAgentId,
+      );
       this.db
         .query(
           `INSERT OR IGNORE INTO agent_skills (
@@ -331,7 +372,7 @@ export class ManagerStore {
           FROM agent_skills
           WHERE agent_id = ?2`,
         )
-        .run(nextAgentId, agentId);
+        .run(nextRecordId, agentId);
 
       this.db.query("DELETE FROM agent_skills WHERE agent_id = ?1").run(agentId);
 
@@ -344,7 +385,10 @@ export class ManagerStore {
       }
     }
 
-    const updated = await this.getAgent(nextAgentId);
+    const updatedAgentId = nextIdentityChanged
+      ? this.createAgentRecordId(nextStorage.scope, nextStorage.projectPath, nextAgentId)
+      : agentId;
+    const updated = await this.getAgent(updatedAgentId);
     if (!updated) {
       throw new Error("Failed to reload updated agent");
     }
@@ -849,10 +893,10 @@ export class ManagerStore {
     const globalModel = resolvedConfig.config.model || DEFAULT_MODEL;
     const globalReasoning =
       resolvedConfig.config.model_reasoning_effort || DEFAULT_REASONING;
-    const configFiles = await this.listAgentConfigFiles();
+    const configFiles = await this.listKnownAgentConfigFiles();
 
     const agents = await Promise.all(
-      configFiles.map(async (configFile) => {
+      configFiles.map(async ({ configFile, projectPath, scope }) => {
         const fallbackName = path.basename(configFile, ".toml");
         const parsedConfig = await this.readAgentConfigFile(
           configFile,
@@ -863,9 +907,11 @@ export class ManagerStore {
         );
 
         return {
-          id: parsedConfig.name,
+          id: this.createAgentRecordId(scope, projectPath, parsedConfig.name),
           name: parsedConfig.name,
           description: parsedConfig.description,
+          scope,
+          projectPath,
           model: parsedConfig.model,
           reasoningEffort: parsedConfig.reasoningEffort,
           instructions: parsedConfig.instructions,
@@ -877,7 +923,37 @@ export class ManagerStore {
 
     return agents
       .filter((agent): agent is AgentRecord => Boolean(agent))
-      .sort((a, b) => a.name.localeCompare(b.name));
+      .sort((a, b) => {
+        const nameCompare = a.name.localeCompare(b.name);
+        if (nameCompare !== 0) return nameCompare;
+        if (a.scope !== b.scope) return a.scope === "global" ? -1 : 1;
+        return (a.projectPath || "").localeCompare(b.projectPath || "");
+      });
+  }
+
+  private async getProjectOptions(): Promise<ProjectOption[]> {
+    const paths = await this.getConfiguredProjectPaths();
+    return paths.map((projectPath) => ({
+      path: projectPath,
+      label: projectPath,
+    }));
+  }
+
+  private async getActiveProjectPath(
+    knownProjectPaths: string[],
+  ): Promise<string | null> {
+    const globalStatePath = path.join(this.codexHome, ".codex-global-state.json");
+
+    try {
+      const content = await readFile(globalStatePath, "utf8");
+      const parsed = JSON.parse(content) as GlobalStateFile;
+      const activePaths = await this.normalizeKnownProjectPaths(
+        this.readStringArray(parsed["active-workspace-roots"]),
+      );
+      return activePaths.find((entry) => knownProjectPaths.includes(entry)) || null;
+    } catch {
+      return null;
+    }
   }
 
   private getMultiAgentSettings(configRead: ConfigReadResult): MultiAgentSettings {
@@ -1234,9 +1310,9 @@ export class ManagerStore {
       return;
     }
 
-    const configFiles = await this.listAgentConfigFiles();
+    const configFiles = await this.listKnownAgentConfigFiles();
     await Promise.all(
-      configFiles.map(async (configFile) => {
+      configFiles.map(async ({ configFile }) => {
         const currentPaths = await this.readAssignedSkillPathsFromConfig(configFile);
         if (!currentPaths.includes(skillPath)) {
           return;
@@ -1440,16 +1516,225 @@ export class ManagerStore {
     return Array.isArray(value) && value.length > 0 && value.every((entry) => this.isTomlTable(entry));
   }
 
-  private async listAgentConfigFiles(): Promise<string[]> {
+  private async listKnownAgentConfigFiles(): Promise<KnownAgentConfigFile[]> {
+    const locations = await this.getAgentStorageLocations();
+    const configFiles = await Promise.all(
+      locations.map(async (location) => {
+        try {
+          const entries = await readdir(location.agentConfigDir, { withFileTypes: true });
+          return entries
+            .filter((entry) => entry.isFile() && entry.name.endsWith(".toml"))
+            .map((entry) => ({
+              ...location,
+              configFile: path.join(location.agentConfigDir, entry.name),
+            }));
+        } catch {
+          return [] as KnownAgentConfigFile[];
+        }
+      }),
+    );
+
+    return configFiles.flat().sort((a, b) => a.configFile.localeCompare(b.configFile));
+  }
+
+  private async getAgentStorageLocations(): Promise<AgentStorageLocation[]> {
+    const projectPaths = await this.getKnownProjectPathsForDiscovery();
+    return [
+      {
+        scope: "global",
+        projectPath: null,
+        agentConfigDir: this.agentConfigDir,
+      },
+      ...projectPaths.map((projectPath) => ({
+        scope: "project" as const,
+        projectPath,
+        agentConfigDir: path.join(projectPath, ".codex", "agents"),
+      })),
+    ];
+  }
+
+  private async resolveAgentStorageLocation(
+    scope: AgentScope,
+    projectPathInput: string | null,
+  ): Promise<AgentStorageLocation> {
+    if (scope === "global") {
+      return {
+        scope,
+        projectPath: null,
+        agentConfigDir: this.agentConfigDir,
+      };
+    }
+
+    if (scope !== "project") {
+      throw new Error(`Unsupported agent scope '${String(scope)}'`);
+    }
+
+    const projectPath = await this.resolveProjectRootPath(projectPathInput);
+    return {
+      scope,
+      projectPath,
+      agentConfigDir: path.join(projectPath, ".codex", "agents"),
+    };
+  }
+
+  private async resolveProjectRootPath(projectPathInput: string | null): Promise<string> {
+    const trimmed = (projectPathInput || "").trim();
+    if (!trimmed) {
+      throw new Error("Project folder is required for project-specific agents");
+    }
+
+    const expanded =
+      trimmed === "~"
+        ? os.homedir()
+        : trimmed.startsWith("~/")
+          ? path.join(os.homedir(), trimmed.slice(2))
+          : trimmed;
+    const resolved = path.isAbsolute(expanded)
+      ? path.normalize(expanded)
+      : path.resolve(this.cwd, expanded);
+
     try {
-      const entries = await readdir(this.agentConfigDir, { withFileTypes: true });
-      return entries
-        .filter((entry) => entry.isFile() && entry.name.endsWith(".toml"))
-        .map((entry) => path.join(this.agentConfigDir, entry.name))
-        .sort((a, b) => a.localeCompare(b));
+      const entry = await stat(resolved);
+      if (!entry.isDirectory()) {
+        throw new Error("Project folder must be a directory");
+      }
+    } catch (error) {
+      if (error instanceof Error && error.message === "Project folder must be a directory") {
+        throw error;
+      }
+      throw new Error(`Project folder '${resolved}' does not exist`);
+    }
+
+    return resolved;
+  }
+
+  private createAgentRecordId(
+    scope: AgentScope,
+    projectPath: string | null,
+    name: string,
+  ): string {
+    return Buffer.from(
+      JSON.stringify({
+        scope,
+        projectPath,
+        name,
+      }),
+    ).toString("base64url");
+  }
+
+  private async getConfiguredProjectPaths(): Promise<string[]> {
+    const globalStateProjects = await this.readProjectPathsFromGlobalState();
+    if (globalStateProjects.length > 0) {
+      return globalStateProjects;
+    }
+
+    return this.readProjectPathsFromConfigFile();
+  }
+
+  private async getKnownProjectPathsForDiscovery(): Promise<string[]> {
+    return this.normalizeKnownProjectPaths([
+      ...(await this.getConfiguredProjectPaths()),
+      ...this.getPersistedProjectPaths(),
+    ]);
+  }
+
+  private async readProjectPathsFromGlobalState(): Promise<string[]> {
+    const globalStatePath = path.join(this.codexHome, ".codex-global-state.json");
+
+    try {
+      const content = await readFile(globalStatePath, "utf8");
+      const parsed = JSON.parse(content) as GlobalStateFile;
+      return this.normalizeKnownProjectPaths([
+        ...this.readStringArray(parsed["active-workspace-roots"]),
+        ...this.readStringArray(parsed["electron-saved-workspace-roots"]),
+      ]);
     } catch {
       return [];
     }
+  }
+
+  private async readProjectPathsFromConfigFile(): Promise<string[]> {
+    const configPath = path.join(this.codexHome, "config.toml");
+
+    try {
+      const content = await readFile(configPath, "utf8");
+      const parsed = Bun.TOML.parse(content) as { projects?: Record<string, unknown> };
+      return this.normalizeKnownProjectPaths(Object.keys(parsed.projects || {}));
+    } catch {
+      return [];
+    }
+  }
+
+  private async normalizeKnownProjectPaths(paths: string[]): Promise<string[]> {
+    const seen = new Set<string>();
+    const result: string[] = [];
+
+    for (const candidate of paths) {
+      const trimmed = candidate.trim();
+      if (!trimmed) continue;
+
+      const resolved = path.normalize(trimmed);
+      if (seen.has(resolved)) continue;
+
+      try {
+        const entry = await stat(resolved);
+        if (!entry.isDirectory()) {
+          continue;
+        }
+      } catch {
+        continue;
+      }
+
+      seen.add(resolved);
+      result.push(resolved);
+    }
+
+    return result;
+  }
+
+  private async agentConfigFileExists(configPath: string): Promise<boolean> {
+    try {
+      await access(configPath, fsConstants.F_OK);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private getPersistedProjectPaths(): string[] {
+    const raw = this.getMetadata("project_specific_agent_roots");
+    if (!raw) {
+      return [];
+    }
+
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      return Array.isArray(parsed)
+        ? parsed.filter((entry): entry is string => typeof entry === "string")
+        : [];
+    } catch {
+      return [];
+    }
+  }
+
+  private async rememberProjectPathForDiscovery(projectPath: string | null): Promise<void> {
+    if (!projectPath) {
+      return;
+    }
+
+    const nextPaths = await this.normalizeKnownProjectPaths([
+      ...this.getPersistedProjectPaths(),
+      projectPath,
+    ]);
+    this.setMetadata("project_specific_agent_roots", JSON.stringify(nextPaths));
+  }
+
+  private readStringArray(value: unknown): string[] {
+    if (!Array.isArray(value)) {
+      return [];
+    }
+
+    return value.filter((entry): entry is string => typeof entry === "string");
   }
 
   private upsertLocalSkillCatalogEntry(

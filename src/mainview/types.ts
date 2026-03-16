@@ -1,6 +1,7 @@
 export type ReasoningEffort = "low" | "medium" | "high" | "xhigh" | string;
 
 export type SkillSource = "local" | "remote";
+export type AgentScope = "global" | "project";
 
 export interface Skill {
   key: string;
@@ -25,11 +26,18 @@ export interface Agent {
   id: string;
   name: string;
   description: string;
+  scope: AgentScope;
+  projectPath: string | null;
   model: string;
   reasoningEffort: ReasoningEffort;
   instructions: string;
   configFile: string;
   skillCount: number;
+}
+
+export interface ProjectOption {
+  path: string;
+  label: string;
 }
 
 export interface ModelOption {
@@ -50,6 +58,8 @@ export interface BootstrapPayload {
   agents: Agent[];
   skills: Skill[];
   models: ModelOption[];
+  projects: ProjectOption[];
+  activeProjectPath: string | null;
   settings: MultiAgentSettings;
 }
 
@@ -63,6 +73,8 @@ export interface AgentDetailPayload {
 export interface CreateAgentInput {
   name: string;
   description: string;
+  scope: AgentScope;
+  projectPath: string | null;
   model: string;
   reasoningEffort: ReasoningEffort;
   instructions: string;
@@ -72,6 +84,8 @@ export interface CreateAgentInput {
 export interface UpdateAgentInput {
   name: string;
   description: string;
+  scope: AgentScope;
+  projectPath: string | null;
   model: string;
   reasoningEffort: ReasoningEffort;
   instructions: string;
