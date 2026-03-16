@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useForm, type UseFormRegister } from "react-hook-form";
-import { ArrowLeft, Loader2, Save, Settings2 } from "lucide-react";
+import { ArrowLeft, Loader2, Save } from "lucide-react";
 import { Link } from "react-router";
 import type { MultiAgentSettings, UpdateSettingsInput } from "../types";
 import { useManager } from "../context/ManagerContext";
@@ -170,10 +170,6 @@ export function SettingsPage() {
           <ArrowLeft className="w-3 h-3" />
           Back to catalog
         </Link>
-        <div className="inline-flex items-center gap-2 rounded-full border border-gray-800 bg-[#121212] px-3 py-1 text-xs text-gray-400">
-          <Settings2 className="h-3.5 w-3.5" />
-          Settings
-        </div>
         <h1 className="mt-4 text-2xl text-gray-100">Agent Settings</h1>
         <p className="mt-2 max-w-2xl text-sm leading-6 text-gray-500">
           Control the Codex config values used for agent orchestration. Leave
