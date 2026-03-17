@@ -1,6 +1,22 @@
 import type { ElectrobunConfig } from "electrobun";
 import packageJson from "./package.json" with { type: "json" };
 
+const macCodesignEnabled = Boolean(process.env.ELECTROBUN_DEVELOPER_ID);
+const macNotarizeEnabled =
+  macCodesignEnabled &&
+  (
+    (
+      Boolean(process.env.ELECTROBUN_APPLEAPIISSUER) &&
+      Boolean(process.env.ELECTROBUN_APPLEAPIKEY) &&
+      Boolean(process.env.ELECTROBUN_APPLEAPIKEYPATH)
+    ) ||
+    (
+      Boolean(process.env.ELECTROBUN_APPLEID) &&
+      Boolean(process.env.ELECTROBUN_APPLEIDPASS) &&
+      Boolean(process.env.ELECTROBUN_TEAMID)
+    )
+  );
+
 export default {
   app: {
     name: "Codex Agents Composer",
@@ -16,7 +32,9 @@ export default {
     watchIgnore: ["dist/**"],
     mac: {
       bundleCEF: false,
+      codesign: macCodesignEnabled,
       icons: "assets/AppIcon.iconset",
+      notarize: macNotarizeEnabled,
     },
     linux: {
       bundleCEF: false,

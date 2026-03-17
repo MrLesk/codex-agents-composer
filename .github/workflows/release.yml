@@ -47,6 +47,44 @@ jobs:
           restore-keys: |
             release-bun-${{ runner.os }}-
 
+      - name: Configure macOS signing credentials
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          ELECTROBUN_APPLEAPIISSUER: ${{ secrets.ELECTROBUN_APPLEAPIISSUER }}
+          ELECTROBUN_APPLEAPIKEY: ${{ secrets.ELECTROBUN_APPLEAPIKEY }}
+          ELECTROBUN_APPLEAPIKEY_P8: ${{ secrets.ELECTROBUN_APPLEAPIKEY_P8 }}
+          ELECTROBUN_APPLEID: ${{ secrets.ELECTROBUN_APPLEID }}
+          ELECTROBUN_APPLEIDPASS: ${{ secrets.ELECTROBUN_APPLEIDPASS }}
+          ELECTROBUN_DEVELOPER_ID: ${{ secrets.ELECTROBUN_DEVELOPER_ID }}
+          ELECTROBUN_TEAMID: ${{ secrets.ELECTROBUN_TEAMID }}
+        run: |
+          if [[ -z "$ELECTROBUN_DEVELOPER_ID" ]]; then
+            echo "::error::Missing macOS signing secret ELECTROBUN_DEVELOPER_ID."
+            exit 1
+          fi
+
+          echo "ELECTROBUN_DEVELOPER_ID=$ELECTROBUN_DEVELOPER_ID" >> "$GITHUB_ENV"
+
+          if [[ -n "$ELECTROBUN_APPLEAPIISSUER" && -n "$ELECTROBUN_APPLEAPIKEY" && -n "$ELECTROBUN_APPLEAPIKEY_P8" ]]; then
+            key_path="$RUNNER_TEMP/electrobun-api-key.p8"
+            printf '%s' "$ELECTROBUN_APPLEAPIKEY_P8" > "$key_path"
+            echo "ELECTROBUN_APPLEAPIISSUER=$ELECTROBUN_APPLEAPIISSUER" >> "$GITHUB_ENV"
+            echo "ELECTROBUN_APPLEAPIKEY=$ELECTROBUN_APPLEAPIKEY" >> "$GITHUB_ENV"
+            echo "ELECTROBUN_APPLEAPIKEYPATH=$key_path" >> "$GITHUB_ENV"
+            exit 0
+          fi
+
+          if [[ -n "$ELECTROBUN_APPLEID" && -n "$ELECTROBUN_APPLEIDPASS" && -n "$ELECTROBUN_TEAMID" ]]; then
+            echo "ELECTROBUN_APPLEID=$ELECTROBUN_APPLEID" >> "$GITHUB_ENV"
+            echo "ELECTROBUN_APPLEIDPASS=$ELECTROBUN_APPLEIDPASS" >> "$GITHUB_ENV"
+            echo "ELECTROBUN_TEAMID=$ELECTROBUN_TEAMID" >> "$GITHUB_ENV"
+            exit 0
+          fi
+
+          echo "::error::Missing notarization secrets. Provide either ELECTROBUN_APPLEAPIISSUER/ELECTROBUN_APPLEAPIKEY/ELECTROBUN_APPLEAPIKEY_P8 or ELECTROBUN_APPLEID/ELECTROBUN_APPLEIDPASS/ELECTROBUN_TEAMID."
+          exit 1
+
       - name: Apply release version
         env:
           RELEASE_TAG: ${{ github.event.release.tag_name }}
