@@ -23,6 +23,10 @@ function parseReleaseTag(rawTag) {
   };
 }
 
+function resolveValue(arg, envKey) {
+  return arg || process.env[envKey] || "";
+}
+
 function setVersion(version) {
   const packageJson = readPackageJson();
   packageJson.version = version;
@@ -41,13 +45,13 @@ const [command, arg] = process.argv.slice(2);
 
 switch (command) {
   case "set-version":
-    if (!arg) {
+    if (!resolveValue(arg, "PACKAGE_VERSION")) {
       throw new Error("set-version requires a semver argument.");
     }
-    setVersion(arg);
+    setVersion(resolveValue(arg, "PACKAGE_VERSION"));
     break;
   case "set-version-from-release-tag":
-    setVersionFromReleaseTag(arg);
+    setVersionFromReleaseTag(resolveValue(arg, "RELEASE_TAG"));
     break;
   default:
     throw new Error(
