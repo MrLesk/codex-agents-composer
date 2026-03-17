@@ -21,6 +21,7 @@ Codex Agents Composer provides a visual interface for creating, configuring, and
 ## Features
 
 - **Agent management** — Create and configure Codex agents with a friendly UI. Set models, reasoning levels, and developer instructions without touching config files.
+- **Global and project-scoped agents** — Save agents globally in `~/.codex/agents/` or attach them to a specific project in `.codex/agents/`.
 - **Skill catalog** — Browse available skills from the [skills.sh](https://skills.sh) repository or create your own in the integrated editor.
 - **Drag-and-drop assignment** — Assign skills to agents by dragging them from the catalog. Reorder or remove assignments just as easily.
 - **Persistent configuration** — All changes are saved to your Codex config (`~/.codex/`), so agents and skills are ready to use from the command line immediately.
