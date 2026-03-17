@@ -78,12 +78,17 @@ jobs:
           pattern: release-*
           merge-multiple: true
 
+      - name: Prepare release asset names
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: node scripts/prepare-release-assets.mjs release-artifacts release-upload
+
       - name: Attach assets to GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}
           GH_REPO: ${{ github.repository }}
-        run: gh release upload "$RELEASE_TAG" release-artifacts/* --clobber --repo "$GH_REPO"
+        run: gh release upload "$RELEASE_TAG" release-upload/* --clobber --repo "$GH_REPO"
 
       - name: Checkout default branch
         uses: actions/checkout@v6.0.2
