@@ -1,10 +1,11 @@
 import type { ElectrobunConfig } from "electrobun";
+import packageJson from "./package.json" with { type: "json" };
 
 export default {
   app: {
     name: "Codex Agents Composer",
     identifier: "dev.codex.agents-composer",
-    version: "0.1.0",
+    version: packageJson.version,
     description: "Desktop app for composing Codex agents and skills",
   },
   build: {

@@ -3,6 +3,7 @@ import { readdirSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createInterface } from "node:readline";
+import packageJson from "../../package.json" with { type: "json" };
 
 interface JsonRpcMessage {
   id?: string;
@@ -211,7 +212,7 @@ export async function callCodexAppServer<T>(
       params: {
         clientInfo: {
           name: "codex-agents-composer",
-          version: "0.1.0",
+          version: packageJson.version,
         },
         capabilities: {},
         protocolVersion: 2,
