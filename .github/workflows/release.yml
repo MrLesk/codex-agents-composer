@@ -82,7 +82,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}
-        run: gh release upload "$RELEASE_TAG" release-artifacts/* --clobber
+          GH_REPO: ${{ github.repository }}
+        run: gh release upload "$RELEASE_TAG" release-artifacts/* --clobber --repo "$GH_REPO"
 
       - name: Checkout default branch
         uses: actions/checkout@v6.0.2
